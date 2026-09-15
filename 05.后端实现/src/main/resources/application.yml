@@ -1,0 +1,66 @@
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: kyle-sales-agent
+
+  # ============ 数据源 ============
+  datasource:
+    url: jdbc:mysql://localhost:3306/sales_agent?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: root
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # ============ JPA ============
+  jpa:
+    hibernate:
+      ddl-auto: validate          # 只校验不建表，表结构由 schema.sql 管理
+    show-sql: true
+    open-in-view: false           # 关闭 OSIV（避免长事务）
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+  # ============ Schema 初始化（开发环境） ============
+  sql:
+    init:
+      mode: always                # 开发环境：每次启动都跑 schema.sql
+      schema-locations: classpath:db/schema.sql
+      data-locations: classpath:db/data.sql
+      continue-on-error: false
+
+  # ============ Redis ============
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+# ============ Actuator ============
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# ============ 日志 ============
+logging:
+  level:
+    root: INFO
+    com.kyle.kyle_sales_agent: DEBUG
+    org.hibernate.SQL: DEBUG
