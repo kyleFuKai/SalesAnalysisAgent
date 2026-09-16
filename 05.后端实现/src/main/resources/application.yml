@@ -8,29 +8,36 @@ server:
 spring:
   application:
     name: kyle-sales-agent
+  main:
+    web-application-type: servlet   # 强制 servlet 模式（同时引了 webflux 时防 actuator 端点映射异常）
 
-  # ============ 数据源 ============
+  # ============ 数据源（值来自 .env 环境变量）============
   datasource:
-    url: jdbc:mysql://localhost:3306/sales_agent?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
-    username: root
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=30000
+    username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
 
   # ============ JPA ============
   jpa:
     hibernate:
-      ddl-auto: validate          # 只校验不建表，表结构由 schema.sql 管理
+      ddl-auto: validate            # 只校验 schema 漂移（比 none 严格，比 create 安全）
     show-sql: true
-    open-in-view: false           # 关闭 OSIV（避免长事务）
+    open-in-view: false             # 关闭 OSIV（避免长事务）
+    defer-datasource-initialization: true   # 等 JPA 校验完再跑 SQL 脚本
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
 
-  # ============ Schema 初始化（开发环境） ============
+  # ============ Schema 初始化（开发环境）（建表 + 测试数据，IF NOT EXISTS + INSERT IGNORE 安全重复执行）============
   sql:
     init:
-      mode: always                # 开发环境：每次启动都跑 schema.sql
+      mode: always
       schema-locations: classpath:db/schema.sql
       data-locations: classpath:db/data.sql
       continue-on-error: false
@@ -38,8 +45,9 @@ spring:
   # ============ Redis ============
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       database: 0
       timeout: 2000ms
       lettuce:
@@ -48,19 +56,58 @@ spring:
           max-idle: 8
           min-idle: 0
 
+# ============ LangChain4j（OpenAI 兼容接口 → 智谱 GLM）============
+langchain4j:
+  open-ai:
+    chat-model:
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      api-key: ${ZHIPUAI_API_KEY}
+      model-name: glm-5.3-flash
+      temperature: 0.1
+      max-tokens: 2048
+    streaming-chat-model:
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      api-key: ${ZHIPUAI_API_KEY}
+      model-name: glm-5.3-flash
+      temperature: 0.1
+      max-tokens: 2048
+
+# ============ Sa-Token 鉴权 ============
+sa-token:
+  token-name: Authorization
+  timeout: 86400              # 24 小时 token 过期
+  active-timeout: 1800        # 30 分钟不操作失效
+  is-concurrent: true         # 允许同账号多端登录
+  is-share: true
+  token-style: uuid
+  is-log: false
+  sign:
+    secret: ${SA_TOKEN_SECRET}
+
+# ============ 应用自定义配置 ============
+sales-agent:
+  tool:
+    anomaly-threshold-days: 7         # 异常检测阈值（与需求文档 4.1-E19 "≥7 天" 一致）
+    trend-drop-threshold: 0.3         # 环比下降 30% 触发预警（需求文档 4.1-E18）
+
+app:
+  auth:
+    enabled: false                    # 开发期关掉 auth；生产改 true 启用 Sa-Token
+
 # ============ Actuator ============
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: always            # 开发期看全部 health 详情
 
 # ============ 日志 ============
 logging:
   level:
     root: INFO
     com.kyle.kyle_sales_agent: DEBUG
+    dev.langchain4j: INFO
     org.hibernate.SQL: DEBUG

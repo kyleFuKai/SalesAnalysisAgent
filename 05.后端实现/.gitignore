@@ -32,3 +32,4 @@ logs/
 
 ### Local config ###
 application-local.yml
+.env
