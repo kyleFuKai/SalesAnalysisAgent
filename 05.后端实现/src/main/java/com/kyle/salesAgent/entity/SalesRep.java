@@ -34,7 +34,7 @@ public class SalesRep {
     @Column(name = "region_id", nullable = false)
     private Long regionId;
 
-    /** 角色：SALES_REP/SALES_MANAGER/SALES_DIRECTOR */
+    /** 角色：SALES_REP(销售员)/SALES_MANAGER(销售主管)/SALES_DIRECTOR(销售总监) */
     @Column(nullable = false, length = 20)
     private String role;
 

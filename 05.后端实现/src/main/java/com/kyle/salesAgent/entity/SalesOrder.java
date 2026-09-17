@@ -68,7 +68,7 @@ public class SalesOrder {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal profit;
 
-    /** 状态：COMPLETED/REFUNDED/CANCELLED */
+    /** 状态：COMPLETED(已完成)/REFUNDED(已退单)/CANCELLED(已取消) */
     @Column(nullable = false, length = 20)
     private String status;
 

@@ -47,7 +47,7 @@ public class Product {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal cost;
 
-    /** 状态：ACTIVE/INACTIVE */
+    /** 状态：ACTIVE(在售)/INACTIVE(下架) */
     @Column(nullable = false, length = 20)
     private String status;
 

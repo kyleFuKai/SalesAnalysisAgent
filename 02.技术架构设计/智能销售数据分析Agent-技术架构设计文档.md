@@ -3,7 +3,7 @@
 | 文档属性 | 内容 |
 | --- | --- |
 | 项目名称 | 智能销售数据分析 Agent |
-| 文档版本 | v1.0.3 |
+| 文档版本 | v1.0.4 |
 | 编写日期 | 2026-09-14 |
 | 文档状态 | 初稿（待评审） |
 | 上游文档 | [《业务需求分析文档 v1.1.1》](../01业务需求分析/智能销售数据分析Agent-业务需求分析文档.md) |
@@ -15,7 +15,8 @@
 > | v1.0 | 初版：技术选型（LangChain4j vs Spring AI）、7 层架构、目录结构、请求流转示例 |
 > | v1.0.1 | 评审修订：补充 Service 层 fail-closed 原则、Agent 执行护栏（最大工具轮数/LLM 超时预算）、ChatMemory 归属校验、"无权限 ≠ 无数据"区分原则；收敛 LangChain4j vs Spring AI 选型理由（修正对 Spring AI 的过时表述）；限流单实例前提与 SSE 部署要求；3.2.7 缓存表述与 4.3 对齐；目录补充 dto/audit/exception 包；待办新增 qwen 三特性 spike |
 > | v1.0.2 | 二轮评审：Agent 层补"模型参数（temperature=0）"；第 4 章新增 4.4 "权限结果的结构化标记"（无权限 ≠ 无数据升级为独立决策，含 status 判定方式）与 4.5 "模型确定性约束"；第 7 章补 4.4 矩阵、多轮对话、成本控制等需求映射；待办扩 UserContext 跨线程候选方案、qwen spike 加多轮下权限切换第四特性、审计日志补 PII 脱敏与保留周期；修正 3.2.4 与 4.4 返回类型表述矛盾、评测集路径 |
-| v1.0.3 | ChatMemory 持久化策略明确为"Redis 热缓存 + MySQL `sa_chat_memory` 冷存储"；3.2.7 存储层 Redis 用途、第 5 章 memory 包注释与包职责表同步更新（schema.sql 已落库） |
+> | v1.0.3 | ChatMemory 持久化策略明确为"Redis 热缓存 + MySQL `sa_chat_memory` 冷存储"；3.2.7 存储层 Redis 用途、第 5 章 memory 包注释与包职责表同步更新（schema.sql 已落库） |
+> | v1.0.4 | 第 8 章新增 8.1"数据层技术债清单"（2026-09-18 代码评审识别，共 6 项，按严重度分级）；数据库表结构设计一项标记为已完成（schema.sql + data.sql 已落库） |
 
 ---
 
@@ -386,7 +387,7 @@ SalesAnalysisAgent/
 ## 8. 后续工作（待排期）
 
 - [ ] **技术验证 spike（最高优先级，框架搭建前完成）**：qwen-max + LangChain4j 的"流式输出 + 工具调用 + 多轮记忆 + **多轮下权限切换**"四特性叠加验证——全项目最高风险点。第四特性尤其关键：销售员问完自己的，会话里又问"李明呢"，多轮下权限仍生效
-- [ ] 数据库表结构设计（订单、用户、SKU、退单、销售目标表等；建议引入 Flyway 管理表结构版本）
+- [x] 数据库表结构设计（订单、用户、SKU、退单、销售目标表等；建议引入 Flyway 管理表结构版本）——✅ 已完成：schema.sql（5 表）+ data.sql（50 SKU / 128 订单 / 4 异常埋点）已落库；销售目标表与退单表为已知 gap，Flyway 未引入
 - [ ] System Prompt 详细设计（含权限注入模板、拒绝话术模板、口径说明模板、"无权限 vs 无数据"处理规则）
 - [ ] 5 个工具的接口详细设计（入参、出参、异常处理、缓存策略、结构化权限标记）
 - [ ] UserContext 设计（ThreadLocal 生命周期、跨线程传递、**fail-closed 兜底**）——SSE 流式 + 工具执行常跨线程，ThreadLocal 不传过去会触发 fail-closed 误拦截所有流式请求。候选方案：① InheritableThreadLocal（线程池复用会丢，不彻底）；② TaskDecorator 包裹 Runnable（Spring 标准做法，**推荐**）；③ 全程不切线程（违背流式初衷，放弃）
@@ -395,3 +396,16 @@ SalesAnalysisAgent/
 - [ ] 审计日志表设计与异步写入方案（含 TokenUsage 采集方式：TokenStream / 响应 metadata）——**同时定 PII 脱敏策略（用户问题原文可能含客户姓名/手机号/订单号）与保留周期**（建议 90 天滚动删除，满足合规最低线）
 - [ ] SQL 注入与 Prompt 注入防护专项方案
 - [ ] 评测集建设（≥ 50 条，按需求文档 4.4 矩阵标注）
+
+### 8.1 数据层技术债清单【v1.0.4 新增，2026-09-18 代码评审识别】
+
+> 均为"非错误"的标准缺口，不影响当前功能与测试数据正确性。**建议在 Service 层稳定之后、写工具层（@Tool）之前集中偿还**——工具层消费 Service 返回值，先改再写不会返工。
+
+| # | 严重度 | 技术债 | 现状 | 标准做法 | 涉及文件 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 🔴 高 | Repository 返回 `List<Object[]>` 位置取值 | findRepRanking / findRegionRanking / findProductRanking / findMonthlyTrend / findRefundRateByRep 共 5 条查询，Service 层按 row[0]/row[1] 强转取值，改列序即错（已有注释写反先例） | interface projection（如 `RepRankingView`）或 JPQL 构造器表达式 `SELECT new DTO(...)`，类型安全、按名映射 | SalesOrderRepository + SalesQueryService |
+| 2 | 🟡 中 | 排名 DTO 中 orderCount/totalProfit 硬编码 0 | queryRepRanking / queryRegionRanking 返回的 DTO 带 0 占位，模型可能答"0 笔订单"（威胁需求 8.2 数据正确率 100%） | 补真实统计（COUNT 子查询 / 单独聚合后合并），或从 DTO 暂删这两个字段 | SalesQueryService |
+| 3 | 🟡 中 | 状态/角色字段用裸 String | SalesRep.role、SalesOrder.status、Product.status 均为 String，手滑写错枚举值编译器不报 | Java enum + `@Enumerated(EnumType.STRING)` | 3 个实体 + 相关 Repository/Service |
+| 4 | 🟡 中 | Service 只读方法缺 `@Transactional(readOnly = true)` | SalesQueryService 14 个只读方法均无事务注解 | 类级 `@Transactional(readOnly = true)`，白捡 Hibernate 只读优化 | SalesQueryService |
+| 5 | 🟢 低 | 实体 id/createdAt 的 setter 未关闭 | 类级 `@Setter` 全开，id/createdAt 可被外部改 | 字段级 `@Setter(AccessLevel.NONE)`（已知取舍，挂账） | 4 个实体 |
+| 6 | 🟢 低 | 包名 `salesAgent` 驼峰 / 查询无分页 / 测试依赖真实云 DB | Java 包名惯例全小写；queryOrders 全量无 Pageable；contextLoads 连真实 MySQL+Redis | 包名改动动静大暂不动；Pageable 待数据量上来再加；测试环境换 H2/Testcontainers | 全局 |
