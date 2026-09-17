@@ -1,4 +1,4 @@
-package com.kyle.kyle_sales_agent;
+package com.kyle.salesAgent;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

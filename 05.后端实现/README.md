@@ -9,7 +9,7 @@
 | Spring Boot | 3.5.11 |
 | Java | 21 |
 | Maven | 项目结构 |
-| 主包 | `com.kyle.kyle_sales_agent` |
+| 主包 | `salesAgent` |
 
 ## 依赖清单
 
