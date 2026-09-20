@@ -38,11 +38,21 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
                                @Param("start") LocalDate start,
                                @Param("end") LocalDate end);
 
-    // 各销售员业绩排名
+    // 某销售员某时段的完成订单数（与 sumAmountByRep 配套：金额 + 笔数一起返回）
+    @Query("SELECT COUNT(o) FROM SalesOrder o " +
+           "WHERE o.repId = :repId AND o.status = 'COMPLETED' " +
+           "AND o.orderDate BETWEEN :start AND :end")
+    Long countCompletedByRep(@Param("repId") Long repId,
+                              @Param("start") LocalDate start,
+                              @Param("end") LocalDate end);
+
+    // 各销售员业绩排名（regionId 传 null 表示全公司，与 findMonthlyTrend 同一过滤技巧）
     @Query("SELECT o.repId, SUM(o.amount) AS total FROM SalesOrder o " +
            "WHERE o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end " +
+           "AND (:regionId IS NULL OR o.regionId = :regionId) " +
            "GROUP BY o.repId ORDER BY total DESC")
-    List<Object[]> findRepRanking(@Param("start") LocalDate start,
+    List<Object[]> findRepRanking(@Param("regionId") Long regionId,
+                                   @Param("start") LocalDate start,
                                    @Param("end") LocalDate end);
 
     // 各大区业绩排名
@@ -86,10 +96,10 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
     List<Object[]> findRefundRateByRep(@Param("start") LocalDate start,
                                         @Param("end") LocalDate end);
 
-    // 某大区某时段的订单数（用于异常检测）
+    // 某时段完成订单数（regionId 传 null 表示全公司；异常检测与销售额汇总共用）
     @Query("SELECT COUNT(o) FROM SalesOrder o " +
-           "WHERE o.regionId = :regionId AND o.status = 'COMPLETED' " +
-           "AND o.orderDate BETWEEN :start AND :end")
+           "WHERE o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end " +
+           "AND (:regionId IS NULL OR o.regionId = :regionId)")
     Long countCompletedByRegion(@Param("regionId") Long regionId,
                                  @Param("start") LocalDate start,
                                  @Param("end") LocalDate end);

@@ -15,4 +15,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByCategory(String category);
 
     List<Product> findByStatus(String status);
+
+    // 在售产品计数（Spring Data 方法名推导：SELECT COUNT(*) WHERE status = ?）
+    long countByStatus(String status);
 }

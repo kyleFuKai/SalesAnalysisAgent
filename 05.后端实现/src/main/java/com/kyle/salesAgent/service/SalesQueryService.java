@@ -89,7 +89,7 @@ public class SalesQueryService {
      * 查询指定范围的总销售额
      * <p>业务场景：需求 4.1-B 类用例，如"本月销售额是多少"、"华东区这个月卖了多少钱"
      * <p>权限语义：regionId 为 null 时表示全公司口径（仅总监应如此调用）；
-     * 主管传本区 regionId，销售员场景传 repId 走 {@link #queryOrders} 或后续新增的按人汇总方法
+     * 主管传本区 regionId，销售员按人查询走 {@link #queryRepTotalAmount}
      * <p>口径：毛额，仅 status = COMPLETED 的订单金额合计
      *
      * @param regionId 大区ID（null 表示全公司）
@@ -110,27 +110,58 @@ public class SalesQueryService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);        // 从 0 起累加，无数据时自然返回 0
     }
 
+    /**
+     * 查询指定销售员的总销售额
+     * <p>业务场景：销售员最高频问题"我这个月卖了多少"（需求 3.1 / 4.1-B），
+     * 也服务"张伟和王芳业绩差多少"的对比场景（模型取两人各时段数字相减）
+     * <p>口径：毛额，仅 status = COMPLETED 的订单金额合计（与 {@link #queryTotalAmount} 一致）
+     *
+     * @param repId 销售员ID（必传——按人查询没有"全公司"语义）
+     * @param start 起始日期（含）
+     * @param end   结束日期（含）
+     * @return 总销售额；无符合条件订单时返回 0（COALESCE 兜底，不返回 null）
+     */
+    public BigDecimal queryRepTotalAmount(Long repId, LocalDate start, LocalDate end) {
+        // 按人路径：JPQL 在数据库端完成过滤与聚合
+        return orderRepository.sumAmountByRep(repId, start, end);
+    }
+
+    /**
+     * 查询指定销售员的完成订单数
+     * <p>用途：与 {@link #queryRepTotalAmount} 配套返回（"卖了多少 + 多少单"）
+     * <p>口径：仅 status = COMPLETED 的订单
+     *
+     * @param repId 销售员ID（必传）
+     * @param start 起始日期（含）
+     * @param end   结束日期（含）
+     * @return 完成订单笔数；无数据返回 0
+     */
+    public Long queryRepOrderCount(Long repId, LocalDate start, LocalDate end) {
+        return orderRepository.countCompletedByRep(repId, start, end);
+    }
+
     /** ============================================================
      * 排名查询
      * ============================================================ */
 
     /**
-     * 销售员业绩排名（带姓名、大区信息）
-     * <p>业务场景：需求用例"本月 Top 5 产品"同类的 Top N 场景；
-     * "华东区 Top 3 销售员是谁"（数据流转示例 6 章的演示链路）
-     * <p>权限语义：调用方需保证 start/end 已被权限范围约束（总监全区、主管本区）
+     * 销售员业绩排名（带姓名、大区信息，支持大区过滤）
+     * <p>业务场景：需求用例 Top N 排名场景；"华东区 Top 3 销售员是谁"（数据流转示例 6 章演示链路）
+     * <p>权限语义：regionId 传 null 查全公司（总监视角）；主管传本区 regionId 收窄到本区
      * <p>口径：仅 COMPLETED 订单金额合计，按金额降序取前 N
      * <p>实现说明：repository 返回 Object[]（repId + 总金额），本方法批量补齐
      * 姓名与大区名（一次 findAll 建 Map，避免循环内逐条查询造成 N+1）
      *
-     * @param start 起始日期（含）
-     * @param end   结束日期（含）
-     * @param topN  取前几名
+     * @param regionId 大区ID（null 表示全公司）
+     * @param start    起始日期（含）
+     * @param end      结束日期（含）
+     * @param topN     取前几名
      * @return 销售员业绩列表（金额降序），最多 topN 条；orderCount 暂为 0（待单独统计）
      */
-    public List<RepSalesDTO> queryRepRanking(LocalDate start, LocalDate end, int topN) {
-        // 聚合查询：raw 每行结构为 [repId(0), 总金额(1)]，已按金额降序
-        List<Object[]> raw = orderRepository.findRepRanking(start, end);
+    public List<RepSalesDTO> queryRepRanking(Long regionId, LocalDate start, LocalDate end, int topN) {
+        // 聚合查询：raw 每行结构为 [repId(0), 总金额(1)]，已按金额降序；
+        // regionId 过滤在 SQL 端完成（:regionId IS NULL OR ... 条件）
+        List<Object[]> raw = orderRepository.findRepRanking(regionId, start, end);
 
         // 批量查询销售员信息，避免 N+1：建 id → 实体 映射
         Map<Long, SalesRep> repMap = repRepository.findAll().stream()
@@ -222,6 +253,18 @@ public class SalesQueryService {
         return result;
     }
 
+    /**
+     * 统计在售产品总数
+     * <p>用途：产品"最差排名"场景的零销售提示——零销售数 = 在售总数 − 该时段有单产品数
+     *（GROUP BY 只返回有单产品，零销售的不在结果里，用减法补出个数）
+     *
+     * @return status = ACTIVE 的产品数量
+     */
+    public long countActiveProducts() {
+        // SELECT COUNT(...) WHERE status=? 由 Spring Data 方法名推导生成
+        return productRepository.countByStatus("ACTIVE");
+    }
+
     /** ============================================================
      * 趋势分析
      * ============================================================ */
@@ -294,16 +337,18 @@ public class SalesQueryService {
     /**
      * 查询大区在指定时段内的订单数
      * <p>业务场景：异常检测用例"最近数据有没有什么异常需要关注"——
-     * 大区近 14 天订单数为 0 即触发暴跌预警（测试数据埋点：华北区）
+     * 大区近 14 天订单数为 0 即触发暴跌预警（测试数据埋点：华北区）；
+     * 也为销售额汇总配套返回订单数（"本月卖了多少 + 多少单"）
      * <p>口径：仅 COMPLETED 订单
      *
-     * @param regionId 大区ID
+     * @param regionId 大区ID（传 null 表示全公司）
      * @param start    起始日期（含）
      * @param end      结束日期（含）
      * @return 完成订单数；无数据返回 0
      */
     public Long queryOrderCount(Long regionId, LocalDate start, LocalDate end) {
-        // JPQL 端已完成状态与日期过滤，直接返回计数
+        // JPQL 端已完成状态与日期过滤，直接返回计数；
+        // regionId 为 null 时 (:regionId IS NULL OR ...) 条件自动失效（全公司）
         return orderRepository.countCompletedByRegion(regionId, start, end);
     }
 
