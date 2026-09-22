@@ -5,6 +5,8 @@ import com.kyle.salesAgent.dto.ProductSalesDTO;
 import com.kyle.salesAgent.dto.RegionSalesDTO;
 import com.kyle.salesAgent.dto.RepSalesDTO;
 import com.kyle.salesAgent.entity.SalesOrder;
+import com.kyle.salesAgent.entity.Product;
+import com.kyle.salesAgent.entity.SalesRegion;
 import com.kyle.salesAgent.entity.SalesRep;
 import com.kyle.salesAgent.repository.ProductRepository;
 import com.kyle.salesAgent.repository.SalesOrderRepository;
@@ -321,17 +323,25 @@ public class SalesQueryService {
      * 异常检测辅助
      * ============================================================ */
 
-    /**
-     * 查询产品最后一次出单日期
-     * <p>业务场景：异常检测用例"有没有产品连续多天零销售"——
-     * 判定规则（需求 4.1-E19）：当前日期 − 最后出单日期 ≥ 7 天即触发断货预警
-     *
-     * @param productId 产品ID
-     * @return 该产品最近一笔订单的下单日期；从未出单返回 null（调用方按"无数据"处理，不等于"零销售 N 天"）
-     */
-    public LocalDate queryLastOrderDate(Long productId) {
-        // MAX(order_date) 即最后出单日；JPQL 内已限定 COMPLETED（退单不算出单）
-        return orderRepository.findLastOrderDateByProduct(productId);
+    /** 异常检测的大区集合；当前为全公司，权限接入时在本层统一收敛范围。 */
+    public List<SalesRegion> queryAnomalyRegions() {
+        return regionRepository.findAll();
+    }
+
+    /** 异常检测的普通销售员集合，不包含主管和总监。 */
+    public List<SalesRep> queryAnomalyReps() {
+        return repRepository.findByRole("SALES_REP");
+    }
+
+    /** 仅检测当前在售产品的断销情况。 */
+    public List<Product> queryAnomalyProducts() {
+        return productRepository.findByStatus("ACTIVE");
+    }
+
+    /** 一次聚合所有产品截至 end（含）的最近已完成订单日期；无历史成交的不在 Map 中。 */
+    public Map<Long, LocalDate> queryLastOrderDates(LocalDate end) {
+        return orderRepository.findLastOrderDates(end).stream().collect(Collectors.toMap(
+                row -> ((Number) row[0]).longValue(), row -> (LocalDate) row[1]));
     }
 
     /**

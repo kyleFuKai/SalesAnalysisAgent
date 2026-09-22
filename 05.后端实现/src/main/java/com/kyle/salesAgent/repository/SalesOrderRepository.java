@@ -13,6 +13,11 @@ import java.util.List;
 @Repository
 public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
 
+    // 批量取截止日（含）之前的最近成交日，避免每个 SKU 各查一次。
+    @Query("SELECT o.productId, MAX(o.orderDate) FROM SalesOrder o " +
+           "WHERE o.status = 'COMPLETED' AND o.orderDate <= :end GROUP BY o.productId")
+    List<Object[]> findLastOrderDates(@Param("end") LocalDate end);
+
     // 按销售员查
     List<SalesOrder> findByRepIdAndOrderDateBetween(Long repId, LocalDate start, LocalDate end);
 
@@ -81,11 +86,6 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
     List<Object[]> findMonthlyTrend(@Param("regionId") Long regionId,
                                      @Param("start") LocalDate start,
                                      @Param("end") LocalDate end);
-
-    // 产品最近一次出单日期（用于预警）
-    @Query("SELECT MAX(o.orderDate) FROM SalesOrder o " +
-           "WHERE o.productId = :productId AND o.status = 'COMPLETED'")
-    LocalDate findLastOrderDateByProduct(@Param("productId") Long productId);
 
     // 某销售员的退单率统计
     @Query("SELECT o.repId, " +

@@ -1,9 +1,6 @@
 package com.kyle.salesAgent.controller;
 
-import com.kyle.salesAgent.tool.ChartGeneratorTool;
-import com.kyle.salesAgent.tool.SalesQueryTool;
-import com.kyle.salesAgent.tool.SalesSummaryTool;
-import com.kyle.salesAgent.tool.SalesTrendTool;
+import com.kyle.salesAgent.tool.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,6 +20,7 @@ public class ToolTestController {
     private final SalesSummaryTool salesSummaryTool;
     private final SalesTrendTool salesTrendTool;
     private final ChartGeneratorTool chartGeneratorTool;
+    private final AnomalyDetectionTool anomalyDetectionTool;
 
     /**
      * 统一测试请求体：一个 record 服务全部端点。
@@ -130,5 +128,13 @@ public class ToolTestController {
     public String pieChart(@RequestBody ToolRequest req) {
         return chartGeneratorTool.generatePieChart(
                 req.dimension(), req.startDate(), req.endDate(), req.title());
+    }
+
+    // ==================== 工具五：AnomalyDetectionTool（异常检测） ====================
+
+    @PostMapping("/detect-anomalies")
+    public String detectAnomalies() {
+        // 无参数工具，调用时不需要请求体；统计截止日取前一天，工具内自动计算
+        return anomalyDetectionTool.detectAllAnomalies();
     }
 }
