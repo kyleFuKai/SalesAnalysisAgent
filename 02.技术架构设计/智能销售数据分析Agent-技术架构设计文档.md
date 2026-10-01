@@ -3,7 +3,7 @@
 | 文档属性 | 内容 |
 | --- | --- |
 | 项目名称 | 智能销售数据分析 Agent |
-| 文档版本 | v1.0.5 |
+| 文档版本 | v1.0.6 |
 | 编写日期 | 2026-09-14 |
 | 文档状态 | 初稿（待评审） |
 | 上游文档 | [《业务需求分析文档 v1.1.1》](../01业务需求分析/智能销售数据分析Agent-业务需求分析文档.md) |
@@ -18,6 +18,7 @@
 > | v1.0.3 | ChatMemory 持久化策略明确为"Redis 热缓存 + MySQL `sa_chat_memory` 冷存储"；3.2.7 存储层 Redis 用途、第 5 章 memory 包注释与包职责表同步更新（schema.sql 已落库） |
 > | v1.0.4 | 第 8 章新增 8.1"数据层技术债清单"（2026-09-18 代码评审识别，共 6 项，按严重度分级）；数据库表结构设计一项标记为已完成（schema.sql + data.sql 已落库） |
 > | v1.0.5 | System Prompt 待办增补 CHART_JSON 原样转交约束（工具四图表协议依赖模型原样输出，Prompt 缺约束会导致前端解析失败；远期 SSE 事件分流方案一并记录） |
+> | v1.0.6 | 生产模型定版：Agent 层模型由 qwen-max 调整为**智谱 GLM（glm-5.3-flash，OpenAI 兼容接口 open.bigmodel.cn）**；2.1 技术栈表、6.1 时序图同步更新；Spike 待办标记完成并注明验证期为 qwen-max（GLM 下流式+工具+多轮已在联调中复验通过） |
 
 ---
 
@@ -45,7 +46,7 @@
 | --- | --- | --- |
 | 用户层 | Vue 3 + SSE + ECharts | 极简前端，SSE 流式输出，ECharts 渲染图表 |
 | 接入层 | Spring Boot + Sa-Token + Guava RateLimiter | 认证拦截、限流、路由 |
-| Agent 层 | **LangChain4j** + qwen-max | AI 大脑核心，ReAct 循环 |
+| Agent 层 | **LangChain4j** + 智谱 GLM（glm-5.3-flash） | AI 大脑核心，ReAct 循环；走 OpenAI 兼容接口（open.bigmodel.cn）。Spike 验证期用 qwen-max，定版切换 GLM |
 | 工具层 | LangChain4j `@Tool` 注解 | 5 个工具即"AI 的 5 只手" |
 | Service 层 | Spring Boot Service | 统一业务调度 |
 | 数据访问层 | Spring Data JPA Repository | 不写原生 SQL（除非性能要求） |
@@ -329,7 +330,7 @@ SalesAnalysisAgent/
   │                   │─────────────────────────→│                   │                  │                    │
   │                   │                          │  5.构建 messages(System + 历史 + 用户)
   │                   │                          │  6.传入 5 个工具描述
-  │                   │                          │  7.qwen-max 推理   │                  │                    │
+  │                   │                          │  7.GLM 推理        │                  │                    │
   │                   │                          │  决定调 SalesSummaryTool.getTopReps()
   │                   │                          │──────────────────→│                  │                    │
   │                   │                          │                   │  8.调用 Service.getTopRepsByRegion("华东区", 3, lastMonth)
@@ -387,7 +388,7 @@ SalesAnalysisAgent/
 
 ## 8. 后续工作（待排期）
 
-- [ ] **技术验证 spike（最高优先级，框架搭建前完成）**：qwen-max + LangChain4j 的"流式输出 + 工具调用 + 多轮记忆 + **多轮下权限切换**"四特性叠加验证——全项目最高风险点。第四特性尤其关键：销售员问完自己的，会话里又问"李明呢"，多轮下权限仍生效
+- [x] **技术验证 spike（已完成，结论 GO）**：LangChain4j 的"流式输出 + 工具调用 + 多轮记忆 + **多轮下权限切换**"四特性叠加验证——全项目最高风险点。注：验证期用的是 qwen-max；生产定版智谱 GLM（glm-5.3-flash）后，流式 + 工具调用 + 多轮已在联调中复验通过
 - [x] 数据库表结构设计（订单、用户、SKU、退单、销售目标表等；建议引入 Flyway 管理表结构版本）——✅ 已完成：schema.sql（5 表）+ data.sql（50 SKU / 128 订单 / 4 异常埋点）已落库；销售目标表与退单表为已知 gap，Flyway 未引入
 - [ ] System Prompt 详细设计（含权限注入模板、拒绝话术模板、口径说明模板、"无权限 vs 无数据"处理规则）——**必含 CHART_JSON 原样转交约束**【v1.0.5 增补】：工具四返回 `CHART_JSON:` 前缀的图表 JSON 时，须 Prompt 明确要求模型"原样完整输出该行，禁止用 markdown 代码块包装、禁止改写/截断/省略"——否则前端剥离前缀失败无法渲染；远期更稳方案：SSE 事件分流（图表走独立 chart 事件，不经模型文字通道，见 3.2.1）
 - [ ] 5 个工具的接口详细设计（入参、出参、异常处理、缓存策略、结构化权限标记）
