@@ -26,7 +26,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate            # 只校验 schema 漂移（比 none 严格，比 create 安全）
-    show-sql: true
+    show-sql: false
     open-in-view: false             # 关闭 OSIV（避免长事务）
     defer-datasource-initialization: true   # 等 JPA 校验完再跑 SQL 脚本
     properties:
@@ -94,6 +94,12 @@ app:
   auth:
     enabled: false                    # 开发期关掉 auth；生产改 true 启用 Sa-Token
 
+llm-cost:
+  # 模型单价（元/千 Token），换模型时改这里；两项都为 0 时只记 Token 数不估算费用
+  # 当前模型 glm-5.3-flash：单价请按智谱官网定价页填写
+  input-price-per-k: 0
+  output-price-per-k: 0
+
 # ============ Actuator ============
 management:
   endpoints:
@@ -110,4 +116,4 @@ logging:
     root: INFO
     com.kyle.kyle_sales_agent: DEBUG
     dev.langchain4j: INFO
-    org.hibernate.SQL: DEBUG
+    org.hibernate.SQL: INFO
