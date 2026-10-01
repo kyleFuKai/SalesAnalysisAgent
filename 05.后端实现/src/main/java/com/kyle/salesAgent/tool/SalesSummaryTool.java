@@ -44,9 +44,10 @@ public class SalesSummaryTool {
     public String getTopReps(
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
-            @P("大区名称，如：华东区。传 null 或空字符串表示查全公司") String regionName,
+            @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName,
             @P("返回前 N 名，默认 5，最大 20") int topN) {
 
+        regionName = RegionNameNormalizer.normalize(regionName);
         log.info("工具调用-getTopReps: start={}, end={}, region={}, topN={}",
                 startDate, endDate, regionName, topN);
 
@@ -222,9 +223,8 @@ public class SalesSummaryTool {
      * 销售额汇总，对应用例 5"本月销售额是多少"，也是销售员天天问的
      * "我这个月卖了多少"。
      *
-     * 范围按优先级：传了 repName 就按人查（regionName 忽略），
-     * 不然传了 regionName 按区查，都空就是全公司。
-     * 人优先是因为用户会说"华东区的张伟卖了多少"——人才是主语。
+     * 范围按优先级：传了 repName 就按人查，同时传了 regionName 时会校验其所属大区；
+     * 只传 regionName 按区查，都空就是全公司。
      *
      * 口径：毛额，只算 COMPLETED。输出末尾带口径标注，模型回答时会带上，
      * 满足需求 2 节"口径要说明"的要求。
@@ -234,9 +234,11 @@ public class SalesSummaryTool {
     public String getSalesSummary(
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
-            @P("大区名称，如：华东区。传 null 表示查全公司。与 repName 同时传时以 repName 为准") String regionName,
-            @P("销售员姓名，如：张伟。传 null 或空表示不按人查询；传了则按该销售员统计，优先于大区") String repName) {
+            @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'；与 repName 同时传时会校验所属大区") String regionName,
+            @P("销售员姓名，如：张伟。未指定时传空字符串，不要传字符串 'null'；指定后按该销售员统计") String repName) {
 
+        regionName = RegionNameNormalizer.normalize(regionName);
+        repName = RepNameNormalizer.normalize(repName);
         log.info("工具调用-getSalesSummary: start={}, end={}, region={}, rep={}",
                 startDate, endDate, regionName, repName);
 
@@ -253,6 +255,15 @@ public class SalesSummaryTool {
                 Long repId = queryService.getRepIdByName(repName);
                 if (repId == null) {
                     return "未找到销售员：" + repName + "，请确认姓名是否正确";
+                }
+                if (regionName != null) {
+                    Long regionId = queryService.getRegionIdByName(regionName);
+                    if (regionId == null) {
+                        return "未找到大区：" + regionName;
+                    }
+                    if (!queryService.repBelongsToRegion(repId, regionId)) {
+                        return String.format("销售员 %s 不属于 %s，请核对查询条件", repName, regionName);
+                    }
                 }
                 totalAmount = queryService.queryRepTotalAmount(repId, start, end);
                 orderCount = queryService.queryRepOrderCount(repId, start, end);

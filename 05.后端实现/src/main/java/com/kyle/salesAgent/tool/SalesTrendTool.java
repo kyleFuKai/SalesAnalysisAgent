@@ -54,11 +54,14 @@ public class SalesTrendTool {
     public String calcMonthOverMonth(
             @P("当前周期开始日期，格式 yyyy-MM-dd") String currentStart,
             @P("当前周期结束日期，格式 yyyy-MM-dd") String currentEnd,
-            @P("对比周期开始日期，格式 yyyy-MM-dd。传 null 则自动计算上一个等长周期") String prevStart,
-            @P("对比周期结束日期，格式 yyyy-MM-dd。传 null 则自动计算上一个等长周期") String prevEnd,
-            @P("大区名称，如：华东区。传 null 表示全公司") String regionName) {
+            @P("对比周期开始日期，格式 yyyy-MM-dd。自动推算时传空字符串，不要传字符串 'null'") String prevStart,
+            @P("对比周期结束日期，格式 yyyy-MM-dd。自动推算时传空字符串，不要传字符串 'null'") String prevEnd,
+            @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName) {
 
-        // 留日志，出了问题能查到模型当时传了什么
+        regionName = RegionNameNormalizer.normalize(regionName);
+        prevStart = normalizeOptionalDate(prevStart);
+        prevEnd = normalizeOptionalDate(prevEnd);
+        // 留日志，出了问题能查到最终采用的查询范围
         log.info("工具调用-calcMonthOverMonth: current={}/{}, prev={}/{}, region={}",
                 currentStart, currentEnd, prevStart, prevEnd, regionName);
 
@@ -66,19 +69,19 @@ public class SalesTrendTool {
             LocalDate cStart = LocalDate.parse(currentStart);
             LocalDate cEnd = LocalDate.parse(currentEnd);
 
+            if ((prevStart == null) != (prevEnd == null)) {
+                return "对比周期需要同时传 prevStart 和 prevEnd（或都不传由系统自动推算）";
+            }
+
             // 对比周期不传就自动推：pEnd 是当期前一天，pStart 再往前数同样的天数。
             // between 算的是差值，+1 才是闭区间天数。
             // 例：当期 9-01~9-30，days=30 → pEnd=8-31，pStart=8-31-29=8-02
             LocalDate pStart, pEnd;
-            if (prevStart == null || prevStart.isBlank()) {
+            if (prevStart == null) {
                 long days = java.time.temporal.ChronoUnit.DAYS.between(cStart, cEnd) + 1;
                 pEnd = cStart.minusDays(1);
                 pStart = pEnd.minusDays(days - 1);
             } else {
-                // 只传 start 不传 end 会 NPE，这里直接告诉模型要成对传
-                if (prevEnd == null || prevEnd.isBlank()) {
-                    return "对比周期需要同时传 prevStart 和 prevEnd（或都不传由系统自动推算）";
-                }
                 pStart = LocalDate.parse(prevStart);
                 pEnd = LocalDate.parse(prevEnd);
             }
@@ -139,8 +142,9 @@ public class SalesTrendTool {
     public String calcYearOverYear(
             @P("查询开始日期，格式 yyyy-MM-dd（今年的日期）") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd（今年的日期）") String endDate,
-            @P("大区名称，如：华东区。传 null 表示全公司") String regionName) {
+            @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName) {
 
+        regionName = RegionNameNormalizer.normalize(regionName);
         log.info("工具调用-calcYearOverYear: start={}, end={}, region={}", startDate, endDate, regionName);
 
         try {
@@ -203,8 +207,9 @@ public class SalesTrendTool {
             "销售走势、趋势是上升还是下降、哪个月是旺季等场景。如果用户要画折线图，先调用此工具获取数据。")
     public String getMonthlyTrend(
             @P("查看近多少个月，如 6 表示近 6 个月，最大 24") int months,
-            @P("大区名称，如：华东区。传 null 表示全公司") String regionName) {
+            @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName) {
 
+        regionName = RegionNameNormalizer.normalize(regionName);
         log.info("工具调用-getMonthlyTrend: months={}, region={}", months, regionName);
 
         try {
@@ -283,6 +288,15 @@ public class SalesTrendTool {
             log.error("获取月度趋势失败", e);
             return "获取趋势数据时出现问题，请稍后重试";
         }
+    }
+
+    /** 自动对比周期的可选日期：空白和字符串 "null" 都视为未提供。 */
+    private String normalizeOptionalDate(String date) {
+        if (date == null || date.isBlank()) {
+            return null;
+        }
+        String normalized = date.trim();
+        return "null".equalsIgnoreCase(normalized) ? null : normalized;
     }
 
     /**

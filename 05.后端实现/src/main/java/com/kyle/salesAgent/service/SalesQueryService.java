@@ -54,10 +54,11 @@ public class SalesQueryService {
     /**
      * 查询指定时段的订单列表（原始明细）
      * <p>业务场景：需求 4.1-A 类用例，如"上个月华东区的所有订单有哪些"、"张磊这个月成交了哪几单"
-     * <p>权限语义：三个参数决定查询范围，调用方按当前用户权限传入——
+     * <p>查询范围由筛选参数决定，调用方按当前用户权限传入——
      * <ul>
-     *   <li>repId 非空：只查该销售员的订单（销售员角色用，只能传自己的 repId）</li>
-     *   <li>regionId 非空：查该大区所有人的订单（主管角色用，只能传本区）</li>
+     *   <li>repId 和 regionId 均非空：只查该销售员在指定大区的订单</li>
+     *   <li>仅 repId 非空：只查该销售员的订单（销售员角色用，只能传自己的 repId）</li>
+     *   <li>仅 regionId 非空：查该大区所有人的订单（主管角色用，只能传本区）</li>
      *   <li>两者都为 null：全量查询（仅总监角色应走到此分支）</li>
      * </ul>
      * <p>口径：包含全部状态（COMPLETED/REFUNDED/CANCELLED），明细场景退单也要能看到
@@ -70,6 +71,10 @@ public class SalesQueryService {
      */
     public List<SalesOrder> queryOrders(Long repId, Long regionId,
                                         LocalDate start, LocalDate end) {
+        if (repId != null && regionId != null) {
+            // 两个筛选条件同时存在时取交集，不能悄悄忽略大区。
+            return orderRepository.findByRepIdAndRegionIdAndOrderDateBetween(repId, regionId, start, end);
+        }
         // 范围从窄到宽依次判断：先按人 → 再按区 → 最后全量
         if (repId != null) {
             // 销售员角色：只查本人订单（最窄范围，优先命中）
@@ -440,6 +445,13 @@ public class SalesQueryService {
         return repRepository.findByName(repName)
                 .map(SalesRep::getId)
                 .orElse(null);
+    }
+
+    /** 同时指定销售员和大区时，校验销售员当前所属大区是否一致。 */
+    public boolean repBelongsToRegion(Long repId, Long regionId) {
+        return repRepository.findById(repId)
+                .map(rep -> regionId.equals(rep.getRegionId()))
+                .orElse(false);
     }
 
 }

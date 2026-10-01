@@ -21,6 +21,10 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
     // 按销售员查
     List<SalesOrder> findByRepIdAndOrderDateBetween(Long repId, LocalDate start, LocalDate end);
 
+    // 同时指定销售员和大区时两个条件都要生效，不能只按人返回跨区订单
+    List<SalesOrder> findByRepIdAndRegionIdAndOrderDateBetween(
+            Long repId, Long regionId, LocalDate start, LocalDate end);
+
     // 按大区查
     List<SalesOrder> findByRegionIdAndOrderDateBetween(Long regionId, LocalDate start, LocalDate end);
 

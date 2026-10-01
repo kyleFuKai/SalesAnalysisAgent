@@ -40,10 +40,12 @@ public class SalesQueryTool {
     public String queryOrders(
             @P("查询开始日期，格式 yyyy-MM-dd，如 2024-11-01") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd，如 2024-11-30") String endDate,
-            @P("大区名称，如：华东区、华南区、华北区、西南区。传 null 或空字符串表示查全公司") String regionName,
-            @P("销售员姓名，如需按特定销售员筛选则传入，如：张磊。否则传 null 或空字符串") String repName,
+            @P("大区名称，如：华东区、华南区、华北区、西南区。查全公司时传空字符串，不要传字符串 'null'") String regionName,
+            @P("销售员姓名，如需按人筛选则传入，如：张磊。未指定时传空字符串，不要传字符串 'null'") String repName,
             @P("最多返回条数，默认 20，最大 50。避免返回数据过多") int limit) {
 
+        regionName = RegionNameNormalizer.normalize(regionName);
+        repName = RepNameNormalizer.normalize(repName);
         log.info("工具调用-queryOrders: start={}, end={}, region={}, repName={}, limit={}",
                 startDate, endDate, regionName, repName, limit);
 
@@ -69,6 +71,10 @@ public class SalesQueryTool {
                 }
             }
 
+            if (repId != null && regionId != null && !queryService.repBelongsToRegion(repId, regionId)) {
+                return String.format("销售员 %s 不属于 %s，请核对查询条件", repName, regionName);
+            }
+
             // 真正的查询在 Service，工具不碰 Repository
             List<SalesOrder> orders = queryService.queryOrders(repId, regionId, start, end);
 
@@ -78,8 +84,8 @@ public class SalesQueryTool {
                         regionName != null ? regionName + " " : "");
             }
 
-            // 上限 50 条，太多了会把模型上下文撑爆
-            int actualLimit = Math.min(limit, 50);
+            // 非正数按默认 20 条处理，上限 50 条，避免返回空列表或撑爆模型上下文。
+            int actualLimit = limit <= 0 ? 20 : Math.min(limit, 50);
             List<SalesOrder> limited = orders.size() > actualLimit
                     ? orders.subList(0, actualLimit) : orders;
 

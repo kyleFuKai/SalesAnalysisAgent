@@ -55,9 +55,10 @@ public class ChartGeneratorTool {
             "月度变化图等可视化需求。返回的 JSON 可直接用于前端 ECharts 渲染。")
     public String generateLineChart(
             @P("近多少个月的数据，如 6 表示近 6 个月") int months,
-            @P("大区名称，如：华东区。传 null 表示全公司") String regionName,
+            @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName,
             @P("图表标题，如：华东区近6个月销售趋势") String title) {
 
+        regionName = RegionNameNormalizer.normalize(regionName);
         log.info("工具调用-generateLineChart: months={}, region={}", months, regionName);
 
         try {
