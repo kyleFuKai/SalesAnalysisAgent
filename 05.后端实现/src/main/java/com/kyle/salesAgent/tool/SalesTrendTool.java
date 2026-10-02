@@ -3,9 +3,11 @@ package com.kyle.salesAgent.tool;
 import com.kyle.salesAgent.dto.MonthlyTrendDTO;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.security.UserContext;
+import com.kyle.salesAgent.security.ToolUserScope;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -37,6 +39,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SalesTrendTool {
 
+    private final ToolUserScope toolUserScope;
+
     private final SalesQueryService queryService;
     private final ToolInputValidator validator;
 
@@ -52,8 +56,18 @@ public class SalesTrendTool {
      *   对比周期（2026-08-02 至 2026-08-31）：¥155,880
      *   环比变化：↑ 增长 19.3%（增加 ¥30,120）
      */
-    @Tool("计算销售环比增长率（当期与上一期对比）。适用于：本月比上月、本季比上季、" +
+    @Tool(name = "calcMonthOverMonth", value = "计算销售环比增长率（当期与上一期对比）。适用于：本月比上月、本季比上季、" +
             "环比增长/下降多少、最近两期对比等场景。")
+    public String calcMonthOverMonthForAgent(@P("当期开始日期，格式 yyyy-MM-dd") String currentStart,
+                                             @P("当期结束日期，格式 yyyy-MM-dd") String currentEnd,
+                                             @P("上期开始日期；自动推算时传空字符串") String prevStart,
+                                             @P("上期结束日期；自动推算时传空字符串") String prevEnd,
+                                             @P("大区名称；全公司时传空字符串") String regionName,
+                                             @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId,
+                () -> calcMonthOverMonth(currentStart, currentEnd, prevStart, prevEnd, regionName));
+    }
+
     public String calcMonthOverMonth(
             @P("当前周期开始日期，格式 yyyy-MM-dd") String currentStart,
             @P("当前周期结束日期，格式 yyyy-MM-dd") String currentEnd,
@@ -167,8 +181,15 @@ public class SalesTrendTool {
      *
      * 输出和环比类似，只是没有差额那一截——年度差额动辄几十万，放着反而干扰阅读。
      */
-    @Tool("计算销售同比增长率（与去年同期对比）。适用于：今年和去年同期比、" +
+    @Tool(name = "calcYearOverYear", value = "计算销售同比增长率（与去年同期对比）。适用于：今年和去年同期比、" +
             "同比增长率、年度对比、YoY 等场景。")
+    public String calcYearOverYearForAgent(@P("今年查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                           @P("今年查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                           @P("大区名称；全公司时传空字符串") String regionName,
+                                           @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> calcYearOverYear(startDate, endDate, regionName));
+    }
+
     public String calcYearOverYear(
             @P("查询开始日期，格式 yyyy-MM-dd（今年的日期）") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd（今年的日期）") String endDate,
@@ -257,8 +278,14 @@ public class SalesTrendTool {
      *   整体趋势：下降 12.3%
      *   旺季判定（基于近 6 个月窗口）：月均 ¥152,000，旺季阈值 ≥1.2×月均 = ¥182,400；旺季月份：2026-04
      */
-    @Tool("获取近 N 个月的月度销售趋势数据。适用于：近几个月的趋势、月度变化情况、" +
+    @Tool(name = "getMonthlyTrend", value = "获取近 N 个月的月度销售趋势数据。适用于：近几个月的趋势、月度变化情况、" +
             "销售走势、趋势是上升还是下降、哪个月是旺季等场景。如果用户要画折线图，先调用此工具获取数据。")
+    public String getMonthlyTrendForAgent(@P("近多少个月，最大 24") int months,
+                                          @P("大区名称；全公司时传空字符串") String regionName,
+                                          @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> getMonthlyTrend(months, regionName));
+    }
+
     public String getMonthlyTrend(
             @P("查看近多少个月，如 6 表示近 6 个月，最大 24") int months,
             @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName) {

@@ -4,8 +4,10 @@ import com.kyle.salesAgent.dto.OrderSummaryDTO;
 import com.kyle.salesAgent.entity.SalesOrder;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.service.SalesQueryService;
+import com.kyle.salesAgent.security.ToolUserScope;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -32,13 +34,24 @@ public class SalesQueryTool {
 
     private final SalesQueryService queryService;
     private final ToolInputValidator validator;
+    private final ToolUserScope toolUserScope;
 
     /**
      * 查订单的工具入口。返回的是拼好的文字（不是 JSON），模型会直接拿来组织回答，
      * 所以格式怎么拼很重要，见 formatOrders。
      */
-    @Tool("查询原始销售订单数据。适用于：查具体订单、看某时段订单列表、统计某时段订单总数。" +
+    @Tool(name = "queryOrders", value = "查询原始销售订单数据。适用于：查具体订单、看某时段订单列表、统计某时段订单总数。" +
          "【不适合】排名、增长率、图表生成、异常检测等场景，那些请使用对应的专用工具。")
+    public String queryOrdersForAgent(
+            @P("查询开始日期，格式 yyyy-MM-dd，如 2024-11-01") String startDate,
+            @P("查询结束日期，格式 yyyy-MM-dd，如 2024-11-30") String endDate,
+            @P("大区名称；未指定时传空字符串") String regionName,
+            @P("销售员姓名；未指定时传空字符串") String repName,
+            @P("最多返回条数，默认 20，最大 50") int limit,
+            @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> queryOrders(startDate, endDate, regionName, repName, limit));
+    }
+
     public String queryOrders(
             @P("查询开始日期，格式 yyyy-MM-dd，如 2024-11-01") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd，如 2024-11-30") String endDate,

@@ -3,8 +3,10 @@ package com.kyle.salesAgent.controller;
 import com.kyle.salesAgent.entity.SalesRep;
 import com.kyle.salesAgent.repository.SalesRepRepository;
 import com.kyle.salesAgent.security.UserContext;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.tool.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/test/tool")
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.tool-test.enabled", havingValue = "true")
 public class ToolTestController {
 
     private final SalesQueryTool salesQueryTool;
@@ -63,6 +66,12 @@ public class ToolTestController {
      * 传 asRepId 则按用户表记录模拟对应角色。查询失败抛 400 级提示由全局异常处理。
      */
     private void simulateIdentity(Long asRepId) {
+        // 开发直调接口即使显式启用，也只允许真实登录身份为总监的账号模拟。
+        // 必须在覆盖 ThreadLocal 前校验，否则销售员可传 asRepId=13 越权查询全公司。
+        UserContext.UserInfo caller = UserContext.get();
+        if (caller == null || !"SALES_DIRECTOR".equals(caller.role())) {
+            throw new PermissionDeniedException("仅销售总监可使用开发测试接口");
+        }
         if (asRepId == null) {
             UserContext.set(new UserContext.UserInfo(13L, "黄总", "SALES_DIRECTOR", 1L, null));
             return;

@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -66,6 +67,9 @@ public class SalesAgentController {
     /** 回答缓存读写。 */
     private final RedisTemplate<String, Object> redisTemplate;
 
+    /** 会话缓存代数：清空会话时递增，避免继续命中清空前的回答。 */
+    private final StringRedisTemplate stringRedisTemplate;
+
     /** 大区 ID → 名称翻译（System Prompt 身份注入用）。 */
     private final SalesQueryService salesQueryService;
 
@@ -78,7 +82,7 @@ public class SalesAgentController {
      */
     private UserContext.UserInfo requireUser() {
         UserContext.UserInfo user = UserContext.get();
-        if (user == null) {
+        if (user == null || !user.hasValidScope()) {
             throw new PermissionDeniedException("未获取到用户身份，请先登录");
         }
         return user;
@@ -96,8 +100,43 @@ public class SalesAgentController {
      * 不同会话不共享（多轮上下文不同，保守不缓存）。
      */
     private String answerKey(UserContext.UserInfo user, String sessionId, String message) {
-        return String.format("answer:%s:%s:%s",
-                UserContext.cacheScopeTag(), sessionId, message.trim());
+        try {
+            String generation = stringRedisTemplate.opsForValue().get(sessionVersionKey(user, sessionId));
+            return String.format("answer:%s:%s:%s:%s:%s",
+                    user.userId(), UserContext.cacheScopeTag(), sessionId,
+                    generation == null ? "0" : generation, message.trim());
+        } catch (Exception e) {
+            log.warn("无法读取会话缓存代数，本次跳过回答缓存 | userId={} | err={}", user.userId(), e.toString());
+            return null;
+        }
+    }
+
+    private String sessionVersionKey(UserContext.UserInfo user, String sessionId) {
+        return "answer:generation:" + user.userId() + ":" + sessionId;
+    }
+
+    private String lastQuestionKey(UserContext.UserInfo user, String sessionId) {
+        return "answer:last-question:" + user.userId() + ":" + sessionId;
+    }
+
+    /** 只允许连续重复的同一句问题命中回答缓存，避免 A→B→A 使用过期的多轮上下文。 */
+    private boolean isConsecutiveRepeat(UserContext.UserInfo user, String sessionId, String message) {
+        try {
+            String previous = stringRedisTemplate.opsForValue().get(lastQuestionKey(user, sessionId));
+            return message.trim().equals(previous);
+        } catch (Exception e) {
+            log.warn("无法读取上轮问题，跳过回答缓存 | userId={} | err={}", user.userId(), e.toString());
+            return false;
+        }
+    }
+
+    private void rememberLastQuestion(UserContext.UserInfo user, String sessionId, String message) {
+        try {
+            stringRedisTemplate.opsForValue().set(lastQuestionKey(user, sessionId), message.trim(),
+                    Duration.ofSeconds(Math.max(answerTtlSeconds * 2, 600)));
+        } catch (Exception e) {
+            log.warn("无法记录上轮问题，本轮不影响回答 | userId={} | err={}", user.userId(), e.toString());
+        }
     }
 
     /**
@@ -116,6 +155,11 @@ public class SalesAgentController {
             row.setToolNames(String.join(",", collected.tools()));
             row.setInputTokens((int) collected.inputTokens());
             row.setOutputTokens((int) collected.outputTokens());
+        } else if (duration == 0L && reply != null) {
+            // 缓存命中不调用模型，和流式路径“尚未采集”区分开。
+            row.setToolNames("");
+            row.setInputTokens(0);
+            row.setOutputTokens(0);
         }
         row.setDurationMs(duration);
         auditService.record(row);
@@ -138,9 +182,11 @@ public class SalesAgentController {
 
         // 回答缓存：同会话内重复提问直接返回，不再消耗模型 Token
         String cacheKey = answerKey(user, request.sessionId(), request.message());
-        Object cachedAnswer = RedisSafe.get(redisTemplate, cacheKey, null);
+        Object cachedAnswer = cacheKey == null || !isConsecutiveRepeat(user, request.sessionId(), request.message())
+                ? null : RedisSafe.get(redisTemplate, cacheKey, null);
         if (cachedAnswer != null) {
             log.info("回答缓存命中: sessionId={}", request.sessionId());
+            recordAudit(user, request.sessionId(), request.message(), (String) cachedAnswer, 0L);
             return ResponseEntity.ok(new ChatResponse(request.sessionId(), (String) cachedAnswer, 0L));
         }
 
@@ -164,7 +210,8 @@ public class SalesAgentController {
         long duration = System.currentTimeMillis() - start;
         log.info("请求完成: sessionId={}, durationMs={}", request.sessionId(), duration);
 
-        RedisSafe.set(redisTemplate, cacheKey, reply, Duration.ofSeconds(answerTtlSeconds));
+        if (cacheKey != null) RedisSafe.set(redisTemplate, cacheKey, reply, Duration.ofSeconds(answerTtlSeconds));
+        rememberLastQuestion(user, request.sessionId(), request.message());
         return ResponseEntity.ok(new ChatResponse(request.sessionId(), reply, duration));
     }
 
@@ -178,7 +225,17 @@ public class SalesAgentController {
     @DeleteMapping("/session/{sessionId}")
     public ResponseEntity<Void> clearSession(@PathVariable String sessionId) {
         UserContext.UserInfo user = requireUser();
-        chatMemoryStore.deleteMessages(scopedMemoryId(user, sessionId));
+        try {
+            String versionKey = sessionVersionKey(user, sessionId);
+            stringRedisTemplate.opsForValue().increment(versionKey);
+            stringRedisTemplate.expire(versionKey, Duration.ofSeconds(Math.max(answerTtlSeconds * 2, 600)));
+        } catch (Exception e) {
+            log.error("会话缓存失效失败，停止清空以避免旧回答重新命中 | userId={}", user.userId(), e);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "会话暂时无法清空，请稍后重试");
+        }
+        String memoryId = scopedMemoryId(user, sessionId);
+        salesAgent.evictChatMemory(memoryId);
+        chatMemoryStore.deleteMessages(memoryId);
         return ResponseEntity.ok().build();
     }
 
@@ -201,9 +258,11 @@ public class SalesAgentController {
 
         // 回答缓存（流式）：命中把整段回答作为一个 token 事件推送，效果与逐字等价
         String cacheKey = answerKey(user, request.sessionId(), request.message());
-        Object cachedAnswer = RedisSafe.get(redisTemplate, cacheKey, null);
+        Object cachedAnswer = cacheKey == null || !isConsecutiveRepeat(user, request.sessionId(), request.message())
+                ? null : RedisSafe.get(redisTemplate, cacheKey, null);
         if (cachedAnswer != null) {
             log.info("流式回答缓存命中: sessionId={}", request.sessionId());
+            recordAudit(user, request.sessionId(), request.message(), (String) cachedAnswer, 0L);
             return Flux.just(
                     ServerSentEvent.<String>builder().event("token").data((String) cachedAnswer).build(),
                     ServerSentEvent.<String>builder().event("done").data("[DONE]").build());
@@ -235,8 +294,9 @@ public class SalesAgentController {
                         long duration = System.currentTimeMillis() - start;
                         recordAudit(user, request.sessionId(), request.message(),
                                 answerBuffer.toString(), duration);
-                        RedisSafe.set(redisTemplate, cacheKey, answerBuffer.toString(),
+                        if (cacheKey != null) RedisSafe.set(redisTemplate, cacheKey, answerBuffer.toString(),
                                 Duration.ofSeconds(answerTtlSeconds));
+                        rememberLastQuestion(user, request.sessionId(), request.message());
                         log.info("流式响应完成: sessionId={}, durationMs={}", request.sessionId(), duration);
                     })
                     .onError(error -> {

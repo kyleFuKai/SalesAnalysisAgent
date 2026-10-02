@@ -31,7 +31,7 @@ import static org.mockito.Mockito.*;
 class AnomalyDetectionToolTest {
     private final SalesQueryService service = mock(SalesQueryService.class);
     private final AnomalyDetectionTool tool =
-            new AnomalyDetectionTool(service, mock(RedisTemplate.class));
+            new AnomalyDetectionTool(service, mock(RedisTemplate.class), null);
     // 固定"今天"，所有时间窗口都基于它推算，用例里的天数才能写死
     private final LocalDate end = LocalDate.of(2026, 9, 20);
 

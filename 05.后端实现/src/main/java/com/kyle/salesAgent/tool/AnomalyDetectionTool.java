@@ -7,8 +7,10 @@ import com.kyle.salesAgent.entity.SalesRegion;
 import com.kyle.salesAgent.entity.SalesRep;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.security.UserContext;
+import com.kyle.salesAgent.security.ToolUserScope;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,6 +57,7 @@ public class AnomalyDetectionTool {
 
     private final SalesQueryService queryService;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final ToolUserScope toolUserScope;
 
     /** 断销判定天数，配置在 application.yml（需求 E19 是 7 天）。 */
     @Value("${sales-agent.tool.anomaly-threshold-days:5}")
@@ -73,9 +76,13 @@ public class AnomalyDetectionTool {
      * 每条异常带四样：类型、严重度、对象、描述 + 处理建议，模型照着转述就行。
      * 一条没查到时也要说明"不代表已排除全部风险"，免得模型答成"一切正常"。
      */
-    @Tool("自动检测销售数据中的所有异常，包括：大区订单量骤降、产品连续零销售、" +
+    @Tool(name = "detectAllAnomalies", value = "自动检测销售数据中的所有异常，包括：大区订单量骤降、产品连续零销售、" +
             "销售员退单率异常、销售员业绩骤降。适用于：有没有异常、风险排查、预警检测等场景。" +
             "无需传入参数，统计截至昨天的完整周期；产品断销仅检测曾有成交的在售产品。")
+    public String detectAllAnomaliesForAgent(@ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, this::detectAllAnomalies);
+    }
+
     public String detectAllAnomalies() {
 
         log.info("工具调用-detectAllAnomalies: 开始全面异常检测");

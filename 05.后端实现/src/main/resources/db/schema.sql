@@ -22,10 +22,11 @@ CREATE TABLE IF NOT EXISTS sa_sales_region (
 CREATE TABLE IF NOT EXISTS sa_sales_rep (
     id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '销售员ID',
     name       VARCHAR(50)  NOT NULL COMMENT '姓名',
-    region_id  BIGINT       NOT NULL COMMENT '所属大区',
+    region_id  BIGINT       DEFAULT NULL COMMENT '所属大区；系统管理员为空',
     role       VARCHAR(20)  NOT NULL DEFAULT 'SALES_REP'
-                            COMMENT '角色：SALES_REP/SALES_MANAGER/SALES_DIRECTOR',
+                            COMMENT '角色：SALES_REP/SALES_MANAGER/SALES_DIRECTOR/SYS_ADMIN',
     password   VARCHAR(72)  NOT NULL COMMENT '密码(BCrypt 哈希)',
+    active     BOOLEAN      NOT NULL DEFAULT TRUE COMMENT '账号是否启用',
     email      VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

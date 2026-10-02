@@ -1,6 +1,7 @@
 package com.kyle.salesAgent.tool;
 
 import com.kyle.salesAgent.entity.SalesRep;
+import com.kyle.salesAgent.entity.SalesRegion;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.repository.ProductRepository;
 import com.kyle.salesAgent.repository.SalesOrderRepository;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,14 +34,16 @@ class SalesQueryServiceScopeTest {
 
     private SalesOrderRepository orders;
     private SalesRepRepository reps;
+    private SalesRegionRepository regions;
     private SalesQueryService service;
 
     @BeforeEach
     void setUp() {
         orders = mock(SalesOrderRepository.class);
         reps = mock(SalesRepRepository.class);
+        regions = mock(SalesRegionRepository.class);
         service = new SalesQueryService(orders, reps,
-                mock(ProductRepository.class), mock(SalesRegionRepository.class));
+                mock(ProductRepository.class), regions);
     }
 
     @AfterEach
@@ -147,6 +151,14 @@ class SalesQueryServiceScopeTest {
     }
 
     @Test
+    void unknownRoleCannotFallThroughToCompanyWideQuery() {
+        UserContext.set(new UserContext.UserInfo(99L, "未知", "UNKNOWN", 1L, 99L));
+        assertThrows(PermissionDeniedException.class,
+                () -> service.queryOrders(null, null, START, END));
+        verifyNoInteractions(orders);
+    }
+
+    @Test
     void salesRepRankingIsRejected() {
         loginRep();
         // 需求 4.4：按人排名对销售员无意义（只能看自己），拒绝而非收窄
@@ -168,10 +180,40 @@ class SalesQueryServiceScopeTest {
     }
 
     @Test
+    void rankingsUseActualOrderCountsAndProfit() {
+        loginDirector();
+        SalesRep rep = new SalesRep();
+        rep.setId(2L);
+        rep.setName("张伟");
+        rep.setRegionId(1L);
+        SalesRegion region = mock(SalesRegion.class);
+        when(region.getId()).thenReturn(1L);
+        when(region.getName()).thenReturn("华东区");
+        when(reps.findAll()).thenReturn(List.of(rep));
+        when(regions.findAll()).thenReturn(List.of(region));
+        when(orders.findRepRanking(null, START, END))
+                .thenReturn(List.<Object[]>of(new Object[]{2L, BigDecimal.valueOf(100), 3L}));
+        when(orders.findRegionRanking(START, END))
+                .thenReturn(List.<Object[]>of(new Object[]{1L, BigDecimal.valueOf(100), 3L, BigDecimal.valueOf(40)}));
+
+        assertEquals(3, service.queryRepRanking(null, START, END, 5).getFirst().orderCount());
+        assertEquals(3, service.queryRegionRanking(START, END).getFirst().orderCount());
+        assertEquals(BigDecimal.valueOf(40), service.queryRegionRanking(START, END).getFirst().totalProfit());
+    }
+
+    @Test
+    void sixMonthTrendIncludesExactlyCurrentAndPreviousFiveMonths() {
+        loginDirector();
+        service.queryMonthlyTrend(null, null, 6);
+        verify(orders).findMonthlyTrend(null, null,
+                LocalDate.now().minusMonths(5).withDayOfMonth(1), LocalDate.now());
+    }
+
+    @Test
     void directorCanQueryWholeCompany() {
         loginDirector();
-        when(orders.findAll()).thenReturn(List.of());
+        when(orders.findByOrderDateBetween(START, END)).thenReturn(List.of());
         assertEquals(List.of(), service.queryOrders(null, null, START, END));
-        verify(orders).findAll();
+        verify(orders).findByOrderDateBetween(START, END);
     }
 }

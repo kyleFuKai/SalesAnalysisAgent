@@ -7,9 +7,11 @@ import com.kyle.salesAgent.dto.RepSalesDTO;
 import com.kyle.salesAgent.dto.RegionSalesDTO;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.security.UserContext;
+import com.kyle.salesAgent.security.ToolUserScope;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -44,6 +46,7 @@ public class ChartGeneratorTool {
     private final ToolInputValidator validator;
     // 用 Spring 容器里那份 ObjectMapper，别自己 new——以后全局改序列化配置时这里跟着走
     private final ObjectMapper objectMapper;
+    private final ToolUserScope toolUserScope;
 
     /**
      * 趋势折线图，对应需求用例 14"画一张近半年的销售趋势折线图"。
@@ -54,8 +57,15 @@ public class ChartGeneratorTool {
      *     "xAxis":{"type":"category","data":["2026-04",...]},
      *     "series":[{"type":"line","data":[186000,...],"smooth":true,...}]}
      */
-    @Tool("生成销售趋势折线图的 ECharts JSON 数据。适用于：画折线图、趋势图、" +
+    @Tool(name = "generateLineChart", value = "生成销售趋势折线图的 ECharts JSON 数据。适用于：画折线图、趋势图、" +
             "月度变化图等可视化需求。返回的 JSON 可直接用于前端 ECharts 渲染。")
+    public String generateLineChartForAgent(@P("近多少个月，如 6") int months,
+                                            @P("大区名称；全公司时传空字符串") String regionName,
+                                            @P("图表标题") String title,
+                                            @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> generateLineChart(months, regionName, title));
+    }
+
     public String generateLineChart(
             @P("近多少个月的数据，如 6 表示近 6 个月") int months,
             @P("大区名称，如：华东区。查全公司时传空字符串，不要传字符串 'null'") String regionName,
@@ -135,8 +145,16 @@ public class ChartGeneratorTool {
      *   CHART_JSON:{"title":{"text":"各大区销售额对比"},
      *     "xAxis":{"type":"category","data":["华东区","华南区",...],"axisLabel":{"rotate":30}},...}
      */
-    @Tool("生成大区或销售员销售额对比的柱状图 ECharts JSON。适用于：画柱状图、" +
+    @Tool(name = "generateBarChart", value = "生成大区或销售员销售额对比的柱状图 ECharts JSON。适用于：画柱状图、" +
             "对比图、排行榜图等可视化需求。")
+    public String generateBarChartForAgent(@P("维度：region 或 rep") String dimension,
+                                           @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                           @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                           @P("图表标题") String title,
+                                           @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> generateBarChart(dimension, startDate, endDate, title));
+    }
+
     public String generateBarChart(
             @P("对比维度：region（按大区对比）或 rep（按销售员对比）") String dimension,
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
@@ -213,8 +231,16 @@ public class ChartGeneratorTool {
      *
      * dimension 传别的值同样直接报错。
      */
-    @Tool("生成销售占比饼图的 ECharts JSON。适用于：画饼图、各部分占比、" +
+    @Tool(name = "generatePieChart", value = "生成销售占比饼图的 ECharts JSON。适用于：画饼图、各部分占比、" +
             "份额分布等可视化需求。")
+    public String generatePieChartForAgent(@P("维度：region 或 category") String dimension,
+                                           @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                           @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                           @P("图表标题") String title,
+                                           @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> generatePieChart(dimension, startDate, endDate, title));
+    }
+
     public String generatePieChart(
             @P("饼图维度：region（大区占比）、category（品类占比）") String dimension,
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,

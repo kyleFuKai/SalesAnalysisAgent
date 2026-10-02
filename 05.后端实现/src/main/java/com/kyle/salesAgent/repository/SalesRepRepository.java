@@ -17,4 +17,6 @@ public interface SalesRepRepository extends JpaRepository<SalesRep, Long> {
     List<SalesRep> findByRoleAndRegionId(String role, Long regionId);
 
     Optional<SalesRep> findByName(String name);
+
+    boolean existsByRole(String role);
 }

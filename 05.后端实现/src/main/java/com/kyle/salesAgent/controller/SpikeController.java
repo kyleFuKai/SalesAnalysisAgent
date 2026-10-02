@@ -4,6 +4,7 @@ import com.kyle.salesAgent.spike.SpikeChatAssistant;
 import com.kyle.salesAgent.spike.SpikeStreamAssistant;
 import com.kyle.salesAgent.spike.SpikeTools;
 import org.springframework.http.MediaType;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +17,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/spike")
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.spike.enabled", havingValue = "true")
 public class SpikeController {
 
     private final SpikeStreamAssistant streamAssistant;

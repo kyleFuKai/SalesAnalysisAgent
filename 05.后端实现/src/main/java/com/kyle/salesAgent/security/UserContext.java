@@ -21,7 +21,7 @@ public class UserContext {
      *
      * @param userId   用户 ID（审计日志用）
      * @param username 姓名（展示用）
-     * @param role     SALES_REP / SALES_MANAGER / SALES_DIRECTOR（技术债 #3：后续换 enum）
+     * @param role     SALES_REP / SALES_MANAGER / SALES_DIRECTOR / SYS_ADMIN（技术债 #3：后续换 enum）
      * @param regionId 大区 ID（主管角色的过滤来源）
      * @param repId    销售员 ID（销售员角色的过滤来源；主管/总监可为 null）
      */
@@ -33,6 +33,11 @@ public class UserContext {
         public boolean isManager() { return "SALES_MANAGER".equals(role); }
 
         public boolean isDirector() { return "SALES_DIRECTOR".equals(role); }
+
+        public boolean hasValidScope() {
+            return isDirector() || (isManager() && regionId != null)
+                    || (isRep() && repId != null);
+        }
     }
 
     public static void set(UserInfo info) { HOLDER.set(info); }

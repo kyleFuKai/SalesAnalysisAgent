@@ -6,8 +6,10 @@ import com.kyle.salesAgent.dto.RepSalesDTO;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.security.UserContext;
 import com.kyle.salesAgent.service.SalesQueryService;
+import com.kyle.salesAgent.security.ToolUserScope;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -36,14 +38,25 @@ import java.util.List;
 @Slf4j
 public class SalesSummaryTool {
 
+    private final ToolUserScope toolUserScope;
+
     private final SalesQueryService queryService;
     private final ToolInputValidator validator;  // 注入校验器
     /**
      * 销售员业绩排名，Top N。对应用例"本月 Top 5 销售员"、"华东区 Top 3 销售员是谁"。
      * regionName 传了就只排本区，不传排全公司。
      */
-    @Tool("计算销售员业绩排名。适用于：谁卖得最多、Top N 销售员、业绩第一名、销售冠军、" +
+    @Tool(name = "getTopReps", value = "计算销售员业绩排名。适用于：谁卖得最多、Top N 销售员、业绩第一名、销售冠军、" +
             "各销售员的销售额对比。可按大区筛选或查全公司。")
+    public String getTopRepsForAgent(
+                                     @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                     @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                     @P("大区名称；全公司时传空字符串") String regionName,
+                                     @P("返回前 N 名，默认 5，最大 20") int topN,
+                                     @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> getTopReps(startDate, endDate, regionName, topN));
+    }
+
     public String getTopReps(
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
@@ -111,8 +124,14 @@ public class SalesSummaryTool {
      * 大区排名，带占比和全公司合计。对应用例 8"各大区销售额排名"，
      * 也是用例 15 饼图的数据来源。只有总监能看跨区数据，上层约束。
      */
-    @Tool("计算各大区的销售业绩排名。适用于：哪个大区最好、大区业绩对比、各区销售额、" +
+    @Tool(name = "getRegionRanking", value = "计算各大区的销售业绩排名。适用于：哪个大区最好、大区业绩对比、各区销售额、" +
             "大区排行榜等场景。")
+    public String getRegionRankingForAgent(@P("查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                           @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                           @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> getRegionRanking(startDate, endDate));
+    }
+
     public String getRegionRanking(
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd") String endDate) {
@@ -168,9 +187,16 @@ public class SalesSummaryTool {
      * 所以"最差榜"是"有单里最差的"，不是真滞销榜。真滞销（连续零销售）
      * 归异常检测工具管（需求 E19）。查最差时输出里会注明这一点。
      */
-    @Tool("计算产品销售排名。适用于：最畅销产品、Top N SKU、哪个产品卖得最好、各品类销售情况。" +
+    @Tool(name = "getTopProducts", value = "计算产品销售排名。适用于：最畅销产品、Top N SKU、哪个产品卖得最好、各品类销售情况。" +
             "传负数 topN 可查有销售记录中卖得最差的产品。" +
             "【注意】零销售产品不在统计范围内，滞销/断货预警请使用异常检测工具。")
+    public String getTopProductsForAgent(@P("查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                         @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                         @P("返回前 N 名，负数查最差的 N 名") int topN,
+                                         @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> getTopProducts(startDate, endDate, topN));
+    }
+
     public String getTopProducts(
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
@@ -255,8 +281,16 @@ public class SalesSummaryTool {
      * 口径：毛额，只算 COMPLETED。输出末尾带口径标注，模型回答时会带上，
      * 满足需求 2 节"口径要说明"的要求。
      */
-    @Tool("计算指定时段的总销售额、订单数等汇总数据。适用于：总销售额是多少、" +
+    @Tool(name = "getSalesSummary", value = "计算指定时段的总销售额、订单数等汇总数据。适用于：总销售额是多少、" +
             "本月/本季/本年收入、某大区整体业绩、某销售员个人业绩（如'我这个月卖了多少'）等场景。")
+    public String getSalesSummaryForAgent(@P("查询开始日期，格式 yyyy-MM-dd") String startDate,
+                                          @P("查询结束日期，格式 yyyy-MM-dd") String endDate,
+                                          @P("大区名称；未指定时传空字符串") String regionName,
+                                          @P("销售员姓名；未指定时传空字符串") String repName,
+                                          @ToolMemoryId String memoryId) {
+        return toolUserScope.call(memoryId, () -> getSalesSummary(startDate, endDate, regionName, repName));
+    }
+
     public String getSalesSummary(
             @P("查询开始日期，格式 yyyy-MM-dd") String startDate,
             @P("查询结束日期，格式 yyyy-MM-dd") String endDate,

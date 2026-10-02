@@ -28,7 +28,7 @@ public class SalesAgentSmokeTest {
     @Test
     void smokeTest() {
         String response = salesAgent.chat(
-                "test-session-001",
+                "13:test-session-001",
                 "你好，你能做什么？",
                 today,
                 userIdentity);
@@ -38,7 +38,7 @@ public class SalesAgentSmokeTest {
     @Test
     void toolCallTest() {
         String response = salesAgent.chat(
-                "test-session-002",
+                "13:test-session-002",
                 "近6个月的月度销售趋势是什么？",
                 today,
                 userIdentity);

@@ -32,7 +32,7 @@ public class SalesRep {
     private String name;
 
     /** 所属大区 */
-    @Column(name = "region_id", nullable = false)
+    @Column(name = "region_id")
     private Long regionId;
 
     /** 角色：SALES_REP(销售员)/SALES_MANAGER(销售主管)/SALES_DIRECTOR(销售总监) */
@@ -43,6 +43,10 @@ public class SalesRep {
     @JsonIgnore
     @Column(nullable = false, length = 72)
     private String password;
+
+    /** 账号是否启用；停用后不可登录。 */
+    @Column(nullable = false)
+    private Boolean active = true;
 
     /** 邮箱 */
     @Column(length = 100)

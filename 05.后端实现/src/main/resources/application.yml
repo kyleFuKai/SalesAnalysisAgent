@@ -34,10 +34,11 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
 
-  # ============ Schema 初始化（开发环境）（建表 + 测试数据，IF NOT EXISTS + INSERT IGNORE 安全重复执行）============
+  # ============ SQL 初始化（默认关闭，避免重启时 data.sql 清空并重灌业务表）============
   sql:
     init:
-      mode: always
+      mode: never
+      # 仅在全新测试数据库需要初始化时，显式覆盖为 always；先核对 data.sql 的 DELETE 语句。
       schema-locations: classpath:db/schema.sql
       data-locations: classpath:db/data.sql
       continue-on-error: false
@@ -101,7 +102,11 @@ sales-agent:
 
 app:
   auth:
-    enabled: false                    # 开发期关掉 auth；生产改 true 启用 Sa-Token
+    enabled: true                     # 问答依赖登录身份注入 UserContext；开发联调也走真实鉴权
+    login-limit:
+      per-account: 5                  # 60 秒内同一账号最多尝试 5 次
+      per-ip: 30                      # 60 秒内同一来源 IP 最多尝试 30 次
+      window-seconds: 60
 
 llm-cost:
   # 模型单价（元/千 Token），换模型时改这里；两项都为 0 时只记 Token 数不估算费用

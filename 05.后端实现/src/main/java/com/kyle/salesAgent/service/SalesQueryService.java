@@ -66,7 +66,7 @@ public class SalesQueryService {
      */
     private UserContext.UserInfo requireUser() {
         UserContext.UserInfo user = UserContext.get();
-        if (user == null) {
+        if (user == null || !user.hasValidScope()) {
             throw new PermissionDeniedException("未获取到用户身份，拒绝查询");
         }
         return user;
@@ -186,12 +186,8 @@ public class SalesQueryService {
             // 主管角色：查本大区所有人的订单
             return orderRepository.findByRegionIdAndOrderDateBetween(regionId, start, end);
         }
-        // 全量查询（只有 SALES_DIRECTOR(销售总监) 角色会走到这里）：
-        // findAll 拉全量后在内存按日期闭区间过滤（!isBefore && !isAfter ≈ BETWEEN）；
-        // 数据量大时应改为 findByOrderDateBetween 让数据库在索引上过滤
-        return orderRepository.findAll().stream()
-                .filter(o -> !o.getOrderDate().isBefore(start) && !o.getOrderDate().isAfter(end))
-                .collect(Collectors.toList());
+        // 全公司明细：由数据库按日期闭区间过滤，不把全表订单加载到应用内存。
+        return orderRepository.findByOrderDateBetween(start, end);
     }
 
     /**
@@ -207,7 +203,7 @@ public class SalesQueryService {
      * @return 总销售额；无符合条件订单时返回 0（COALESCE 兜底，不返回 null）
      */
     @Cacheable(value = "sales-summary",
-            key = "(#regionId == null ? 'all' : #regionId.toString()) + '_' + #start.toString() + '_' + #end.toString()" +
+            key = "'total-amount_' + (#regionId == null ? 'all' : #regionId.toString()) + '_' + #start.toString() + '_' + #end.toString()" +
                     " + '_' + T(com.kyle.salesAgent.security.UserContext).cacheScopeTag()")
     public BigDecimal queryTotalAmount(Long regionId, LocalDate start, LocalDate end) {
         regionId = resolveRegionScope(requireUser(), regionId);
@@ -215,12 +211,8 @@ public class SalesQueryService {
             // 按区路径：JPQL 在数据库端完成过滤与聚合（含 status='COMPLETED'，口径与全公司路径一致）
             return orderRepository.sumAmountByRegion(regionId, start, end);
         }
-        // 全公司路径：内存三步过滤——① 留已完成 ② 留日期区间 ③ 金额求和
-        return orderRepository.findAll().stream()
-                .filter(o -> o.getStatus().equals("COMPLETED"))
-                .filter(o -> !o.getOrderDate().isBefore(start) && !o.getOrderDate().isAfter(end))
-                .map(SalesOrder::getAmount)                       // 提取金额字段
-                .reduce(BigDecimal.ZERO, BigDecimal::add);        // 从 0 起累加，无数据时自然返回 0
+        // 全公司路径：数据库完成状态过滤和聚合，避免加载全部订单。
+        return orderRepository.sumAmountAll(start, end);
     }
 
     /**
@@ -235,7 +227,7 @@ public class SalesQueryService {
      * @return 总销售额；无符合条件订单时返回 0（COALESCE 兜底，不返回 null）
      */
     @Cacheable(value = "sales-summary",
-            key = "(#repId == null ? 'self' : #repId.toString()) + '_' + #start.toString() + '_' + #end.toString()" +
+            key = "'rep-amount_' + (#repId == null ? 'self' : #repId.toString()) + '_' + #start.toString() + '_' + #end.toString()" +
                     " + '_' + T(com.kyle.salesAgent.security.UserContext).cacheScopeTag()")
     public BigDecimal queryRepTotalAmount(Long repId, LocalDate start, LocalDate end) {
         // 按人路径：先收敛范围（销售员强制本人、主管校验本区归属），再在数据库端过滤聚合
@@ -254,7 +246,7 @@ public class SalesQueryService {
      * @return 完成订单笔数；无数据返回 0
      */
     @Cacheable(value = "sales-summary",
-            key = "(#repId == null ? 'self' : #repId.toString()) + '_' + #start.toString() + '_' + #end.toString()" +
+            key = "'rep-count_' + (#repId == null ? 'self' : #repId.toString()) + '_' + #start.toString() + '_' + #end.toString()" +
                     " + '_' + T(com.kyle.salesAgent.security.UserContext).cacheScopeTag()")
     public Long queryRepOrderCount(Long repId, LocalDate start, LocalDate end) {
         repId = resolveRepScope(requireUser(), repId);
@@ -277,10 +269,10 @@ public class SalesQueryService {
      * @param start    起始日期（含）
      * @param end      结束日期（含）
      * @param topN     取前几名
-     * @return 销售员业绩列表（金额降序），最多 topN 条；orderCount 暂为 0（待单独统计）
+     * @return 销售员业绩列表（金额降序），最多 topN 条；订单数由同一聚合查询返回
      */
     @Cacheable(value = "rep-ranking",
-            key = "(#regionId == null ? 'all' : #regionId.toString()) + '_' + #start.toString() + '_' + #end.toString() + '_' + #topN" +
+            key = "'v2_' + (#regionId == null ? 'all' : #regionId.toString()) + '_' + #start.toString() + '_' + #end.toString() + '_' + #topN" +
                     " + '_' + T(com.kyle.salesAgent.security.UserContext).cacheScopeTag()")
     public List<RepSalesDTO> queryRepRanking(Long regionId, LocalDate start, LocalDate end, int topN) {
         UserContext.UserInfo user = requireUser();
@@ -292,7 +284,7 @@ public class SalesQueryService {
         // topN 在 Service 层兜底：上游忘 clamp 时防 0/负数导致空结果被误答成"暂无数据"
         topN = Math.max(1, Math.min(topN, 50));
 
-        // 聚合查询：raw 每行结构为 [repId(0), 总金额(1)]，已按金额降序；
+        // 聚合查询：raw 每行结构为 [repId(0), 总金额(1), 订单数(2)]，已按金额降序；
         // regionId 过滤在 SQL 端完成（:regionId IS NULL OR ... 条件）
         List<Object[]> raw = orderRepository.findRepRanking(regionId, start, end);
 
@@ -308,15 +300,15 @@ public class SalesQueryService {
             // row[0] 实际类型可能是 Long/BigInteger 等，统一经 Number 转 Long
             Long repId = ((Number) row[0]).longValue();
             BigDecimal total = new BigDecimal(row[1].toString());
+            int orderCount = ((Number) row[2]).intValue();
             // 销售员不存在（数据不一致）时跳过该行，避免 NPE
             SalesRep rep = repMap.get(repId);
             if (rep == null) continue;
 
             // 补齐大区名；映射查不到（脏数据）时兜底"未知"而非 null
             String regionName = regionNameMap.getOrDefault(rep.getRegionId(), "未知");
-            // 这里 orderCount 需要单独查，简化处理用 0（上线前必须补真值，防模型答"0 笔"）
             result.add(new RepSalesDTO(repId, rep.getName(), rep.getRegionId(),
-                    regionName, total, 0));
+                    regionName, total, orderCount));
 
             // raw 本身已降序，凑够 topN 即可提前退出
             if (result.size() >= topN) break;
@@ -332,17 +324,17 @@ public class SalesQueryService {
      *
      * @param start 起始日期（含）
      * @param end   结束日期（含）
-     * @return 大区业绩列表（金额降序），全量大区；orderCount/totalProfit 暂为 0（待单独统计）
+     * @return 大区业绩列表（金额降序），订单数和毛利由同一聚合查询返回
      */
     @Cacheable(value = "region-ranking",
-            key = "#start.toString() + '_' + #end.toString()" +
+            key = "'v2_' + #start.toString() + '_' + #end.toString()" +
                     " + '_' + T(com.kyle.salesAgent.security.UserContext).cacheScopeTag()")
     public List<RegionSalesDTO> queryRegionRanking(LocalDate start, LocalDate end) {
         // 需求 4.4 矩阵：跨区对比是总监专属，主管/销售员直接拒绝（不是收窄）
         if (!requireUser().isDirector()) {
             throw new PermissionDeniedException("各大区业绩对比仅销售总监可查看");
         }
-        // raw 每行结构为 [regionId(0), 总金额(1)]，已按金额降序
+        // raw 每行结构为 [regionId(0), 总金额(1), 订单数(2), 毛利(3)]，已按金额降序
         List<Object[]> raw = orderRepository.findRegionRanking(start, end);
         // 批量补齐大区名，避免循环内逐条查询
         Map<Long, String> regionNameMap = regionRepository.findAll().stream()
@@ -351,10 +343,11 @@ public class SalesQueryService {
         return raw.stream().map(row -> {
             Long regionId = ((Number) row[0]).longValue();
             BigDecimal total = new BigDecimal(row[1].toString());
+            int orderCount = ((Number) row[2]).intValue();
+            BigDecimal totalProfit = new BigDecimal(row[3].toString());
             // 映射查不到（脏数据）时兜底"未知"
             String regionName = regionNameMap.getOrDefault(regionId, "未知");
-            // orderCount/totalProfit 暂为 0 占位（上线前必须补真值）
-            return new RegionSalesDTO(regionId, regionName, total, 0, BigDecimal.ZERO);
+            return new RegionSalesDTO(regionId, regionName, total, orderCount, totalProfit);
         }).collect(Collectors.toList());
     }
 
@@ -441,9 +434,9 @@ public class SalesQueryService {
         repId = scope.repId();
         regionId = scope.regionId();
 
-        // 统计窗口：months 个月前那个月的 1 号 → 今天（含当月，当月数据不完整由调用方说明）
+        // 统计窗口：含当月共 months 个自然月；例如 6 表示当月加之前 5 个月。
         LocalDate end = LocalDate.now();
-        LocalDate start = end.minusMonths(months).withDayOfMonth(1);
+        LocalDate start = end.minusMonths(Math.max(months, 1) - 1L).withDayOfMonth(1);
 
         // 原生 SQL 聚合：raw 每行结构为 [月份字符串(0), 总金额(1), 订单数(2)]
         // regionId/repId 传 null 时由 SQL 内的 (:xx IS NULL OR ...) 分支处理全公司口径

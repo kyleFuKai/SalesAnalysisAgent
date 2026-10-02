@@ -1,14 +1,18 @@
 package com.kyle.salesAgent.config;
 
 import cn.dev33.satoken.interceptor.SaInterceptor;
-import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
+import com.kyle.salesAgent.entity.SalesRep;
+import com.kyle.salesAgent.repository.SalesRepRepository;
 import com.kyle.salesAgent.security.UserContext;
+import lombok.RequiredArgsConstructor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -21,7 +25,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  */
 @Configuration
 @Slf4j
+@RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer{
+
+    private final SalesRepRepository repRepository;
 
     @Value("${app.auth.enabled:true}")
     private boolean authEnabled;
@@ -53,7 +60,7 @@ public class WebMvcConfig implements WebMvcConfigurer{
                         "/error"          // 异常转发路径：不拦，否则原始报错会被二次 NotLoginException 掩盖
                 );
 
-        // 用户上下文填充拦截器——从 Sa-Token Session 读取用户信息写入 ThreadLocal
+        // 每次从数据库读取最新角色和账号状态，避免停用/角色变化后旧 Session 继续越权。
         registry.addInterceptor(new HandlerInterceptor() {
             @Override
             public boolean preHandle(HttpServletRequest request,
@@ -61,13 +68,14 @@ public class WebMvcConfig implements WebMvcConfigurer{
                                      Object handler) {
                 if (StpUtil.isLogin()) {
                     Long userId    = StpUtil.getLoginIdAsLong();
-                    SaSession session = StpUtil.getSession();
-                    String username = (String) session.get("username");
-                    String role     = (String) session.get("role");
-                    Long regionId   = session.get("regionId") instanceof Number n ? n.longValue() : null;
-                    Long repId      = session.get("repId")    instanceof Number n ? n.longValue() : null;
-                    UserContext.set(new UserContext.UserInfo(userId, username, role, regionId, repId));
-                    log.debug("用户已认证: userId={}, role={}", userId, role);
+                    SalesRep rep = repRepository.findById(userId).orElse(null);
+                    if (rep == null || !Boolean.TRUE.equals(rep.getActive())) {
+                        StpUtil.logout(userId);
+                        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "账号已停用或登录信息已失效");
+                    }
+                    UserContext.set(new UserContext.UserInfo(userId, rep.getName(), rep.getRole(),
+                            rep.getRegionId(), rep.getId()));
+                    log.debug("用户已认证: userId={}, role={}", userId, rep.getRole());
                 }
                 return true;
             }

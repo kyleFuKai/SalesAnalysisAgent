@@ -31,6 +31,9 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
     // 按大区查
     List<SalesOrder> findByRegionIdAndOrderDateBetween(Long regionId, LocalDate start, LocalDate end);
 
+    // 总监全公司明细：日期过滤在数据库执行，避免 findAll 拉全表。
+    List<SalesOrder> findByOrderDateBetween(LocalDate start, LocalDate end);
+
     // 按产品查
     List<SalesOrder> findByProductIdAndOrderDateBetween(Long productId, LocalDate start, LocalDate end);
 
@@ -41,6 +44,12 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
     BigDecimal sumAmountByRegion(@Param("regionId") Long regionId,
                                   @Param("start") LocalDate start,
                                   @Param("end") LocalDate end);
+
+    // 全公司完成订单金额：与按大区查询同一口径，不在内存遍历全表。
+    @Query("SELECT COALESCE(SUM(o.amount), 0) FROM SalesOrder o " +
+           "WHERE o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end")
+    BigDecimal sumAmountAll(@Param("start") LocalDate start,
+                            @Param("end") LocalDate end);
 
     // 某销售员某时段的完成订单总金额
     @Query("SELECT COALESCE(SUM(o.amount), 0) FROM SalesOrder o " +
@@ -59,7 +68,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
                               @Param("end") LocalDate end);
 
     // 各销售员业绩排名（regionId 传 null 表示全公司，与 findMonthlyTrend 同一过滤技巧）
-    @Query("SELECT o.repId, SUM(o.amount) AS total FROM SalesOrder o " +
+    @Query("SELECT o.repId, SUM(o.amount) AS total, COUNT(o) AS orderCount FROM SalesOrder o " +
            "WHERE o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end " +
            "AND (:regionId IS NULL OR o.regionId = :regionId) " +
            "GROUP BY o.repId ORDER BY total DESC")
@@ -68,7 +77,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
                                    @Param("end") LocalDate end);
 
     // 各大区业绩排名
-    @Query("SELECT o.regionId, SUM(o.amount) AS total FROM SalesOrder o " +
+    @Query("SELECT o.regionId, SUM(o.amount) AS total, COUNT(o) AS orderCount, SUM(o.profit) AS totalProfit FROM SalesOrder o " +
            "WHERE o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end " +
            "GROUP BY o.regionId ORDER BY total DESC")
     List<Object[]> findRegionRanking(@Param("start") LocalDate start,

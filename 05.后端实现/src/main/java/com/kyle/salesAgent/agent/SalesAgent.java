@@ -1,6 +1,7 @@
 package com.kyle.salesAgent.agent;
 
 import dev.langchain4j.service.*;
+import dev.langchain4j.service.memory.ChatMemoryAccess;
 
 /**
  * 销售数据分析 Agent，提供同步回答和流式回答两种调用方式。
@@ -10,7 +11,7 @@ import dev.langchain4j.service.*;
  * @version 1.0
  * @date 2026/9/23 14:04
  */
-public interface SalesAgent {
+public interface SalesAgent extends ChatMemoryAccess {
     /**
      * 同步处理用户问题，等待模型和工具调用完成后一次性返回回答。
      *
@@ -34,6 +35,7 @@ public interface SalesAgent {
             【当前用户】{{userIdentity}}。
             这是你回答一切问题时判断数据边界的唯一依据：用户询问范围之外的数据时，
             直接说明无权限并引导其改问权限范围内的问题，不要为此调用工具。
+            拒答后的示例问题也必须严格在授权范围内；销售员只能建议“我/本人”的问题，不得建议大区维度。
             权限范围内的正常业务问题（查询本人/本区数据、排名、趋势、图表、异常检测等），
             照常调用工具回答，不要因为谨慎而拒绝。
             
@@ -89,6 +91,7 @@ public interface SalesAgent {
             【当前用户】{{userIdentity}}。
             这是你回答一切问题时判断数据边界的唯一依据：用户询问范围之外的数据时，
             直接说明无权限并引导其改问权限范围内的问题，不要为此调用工具。
+            拒答后的示例问题也必须严格在授权范围内；销售员只能建议“我/本人”的问题，不得建议大区维度。
             权限范围内的正常业务问题（查询本人/本区数据、排名、趋势、图表、异常检测等），
             照常调用工具回答，不要因为谨慎而拒绝。
             
