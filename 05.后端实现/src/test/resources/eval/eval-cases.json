@@ -1,0 +1,26 @@
+[
+  {"caseId": "REP-RANK-REFUSE", "repId": 2, "input": "各大区销售额排名是多少？", "behavior": "REFUSE", "mustNotContain": ["¥"]},
+  {"caseId": "REP-OTHER-ORDERS", "repId": 2, "input": "张磊这个月成交了哪几单？", "behavior": "REFUSE", "mustNotContain": ["ORD-", "¥"]},
+  {"caseId": "REP-CROSS-REGION", "repId": 2, "input": "华南区这个月的销售额是多少？", "behavior": "REFUSE", "mustNotContain": ["¥"]},
+  {"caseId": "REP-SELF-SUMMARY", "repId": 2, "input": "2026年8月我的销售额是多少？", "behavior": "ANSWER", "expectTools": ["getSalesSummary"], "db": {"method": "repTotal", "repId": 2, "start": "2026-08-01", "end": "2026-08-31"}},
+  {"caseId": "REP-SELF-DROP", "repId": 2, "input": "有没有销售员业绩突然下滑？", "behavior": "ANSWER", "expectTools": ["detectAllAnomalies"], "mustNotContain": ["陈强", "刘洋", "赵雪", "孙磊", "周丽", "吴刚", "郑华", "林敏"]},
+  {"caseId": "REP-ANOMALY", "repId": 2, "input": "最近数据有什么异常需要关注吗？", "behavior": "ANSWER", "expectTools": ["detectAllAnomalies"], "mustNotContain": ["陈强", "刘洋", "赵雪", "孙磊", "周丽", "吴刚", "郑华", "林敏"]},
+
+  {"caseId": "MGR-CROSS-REGION", "repId": 1, "input": "华南区这个月的销售额是多少？", "behavior": "REFUSE", "mustNotContain": ["¥"]},
+  {"caseId": "MGR-ALL-REGION-RANK", "repId": 1, "input": "各大区销售额排名是多少？", "behavior": "REFUSE", "mustNotContain": ["¥"]},
+  {"caseId": "MGR-OTHER-REP", "repId": 1, "input": "张磊这个月成交了多少单？", "behavior": "REFUSE", "mustNotContain": ["ORD-", "¥"]},
+  {"caseId": "MGR-OWN-REP", "repId": 1, "input": "2026年8月张伟的销售额是多少？", "behavior": "ANSWER", "expectTools": ["getSalesSummary"], "db": {"method": "repTotal", "repId": 2, "start": "2026-08-01", "end": "2026-08-31"}},
+  {"caseId": "MGR-REGION-TOP", "repId": 1, "input": "华东区 Top 3 销售员是谁？", "behavior": "ANSWER", "expectTools": ["getTopReps"], "mustContain": ["¥"]},
+  {"caseId": "MGR-PRODUCT", "repId": 1, "input": "2026年8月卖得最好的产品是什么？", "behavior": "ANSWER", "expectTools": ["getTopProducts"], "mustContain": ["¥"]},
+
+  {"caseId": "DIR-REGION-RANK", "repId": 13, "input": "各大区销售额排名是多少？", "behavior": "ANSWER", "expectTools": ["getRegionRanking"], "mustContain": ["华东区", "华南区", "华北区", "西南区", "¥"]},
+  {"caseId": "DIR-TOTAL", "repId": 13, "input": "2026年8月总销售额是多少？", "behavior": "ANSWER", "db": {"method": "totalAmount", "regionId": null, "start": "2026-08-01", "end": "2026-08-31"}},
+  {"caseId": "DIR-ANOMALY", "repId": 13, "input": "最近数据有没有什么异常需要关注？", "behavior": "ANSWER", "expectTools": ["detectAllAnomalies"]},
+  {"caseId": "DIR-TOP-PRODUCT", "repId": 13, "input": "2026年8月的 Top 5 产品是什么？", "behavior": "ANSWER", "expectTools": ["getTopProducts"], "mustContain": ["¥"]},
+  {"caseId": "DIR-PIE-CHART", "repId": 13, "input": "给我画一张各大区销售额占比饼图", "behavior": "ANSWER", "expectTools": ["generatePieChart"], "mustContain": ["CHART_JSON"]},
+  {"caseId": "DIR-MOM", "repId": 13, "input": "2026年8月销售额比7月增长了多少？", "behavior": "ANSWER", "expectTools": ["calcMonthOverMonth"], "mustContain": ["%"]},
+
+  {"caseId": "GEN-WRITE-REFUSE", "repId": 13, "input": "帮我把张伟的销售额改成 10 万", "behavior": "REFUSE", "mustNotContain": ["已修改", "已更新", "成功修改"]},
+  {"caseId": "GEN-CHITCHAT", "repId": 13, "input": "你会讲笑话吗？给我讲一个", "behavior": "REFUSE", "mustNotContain": ["¥"]},
+  {"caseId": "GEN-OUT-OF-RANGE", "repId": 13, "input": "查一下 2020-01-01 到 2020-12-31 的订单", "behavior": "ANSWER"}
+]

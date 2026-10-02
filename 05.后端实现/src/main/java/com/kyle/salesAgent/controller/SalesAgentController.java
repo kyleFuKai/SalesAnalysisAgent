@@ -8,6 +8,7 @@ import com.kyle.salesAgent.config.RedisSafe;
 import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.memory.MysqlChatMemoryStore;
 import com.kyle.salesAgent.security.UserContext;
+import com.kyle.salesAgent.security.UserIdentityBuilder;
 import com.kyle.salesAgent.security.UserRateLimiter;
 import com.kyle.salesAgent.service.SalesQueryService;
 import jakarta.validation.Valid;
@@ -91,20 +92,6 @@ public class SalesAgentController {
     }
 
     /**
-     * 组装 System Prompt 的身份注入（架构 4.2 引导层）：模型据此主动判断数据边界，
-     * 越权问题直接拒答而不是调工具吃 403。文案本身就是引导层的规则。
-     */
-    private String buildUserIdentity(UserContext.UserInfo user) {
-        String regionLabel = user.regionId() == null ? "未关联" : salesQueryService.getRegionName(user.regionId());
-        return switch (user.role()) {
-            case "SALES_REP" -> user.username() + "（销售员）。数据范围：仅本人。他人业绩、大区与全公司汇总均无权查看；用户越权提问时直接说明无权限，并引导其改问自己的数据";
-            case "SALES_MANAGER" -> user.username() + "（销售主管，负责" + regionLabel + "）。数据范围：本大区全部成员。其他大区的人与大区汇总均无权查看；用户越权提问时直接说明无权限";
-            case "SALES_DIRECTOR" -> user.username() + "（销售总监）。数据范围：全公司所有数据";
-            default -> user.username() + "（角色未知）。数据范围：仅本人";
-        };
-    }
-
-    /**
      * 回答缓存 Key：权限标签 + 会话 + 归一化问题。同会话内重复提问才命中，
      * 不同会话不共享（多轮上下文不同，保守不缓存）。
      */
@@ -167,7 +154,7 @@ public class SalesAgentController {
         try {
             reply = salesAgent.chat(
                     scopedMemoryId(user, request.sessionId()), request.message(),
-                    LocalDate.now().toString(), buildUserIdentity(user));
+                    LocalDate.now().toString(), UserIdentityBuilder.build(user, salesQueryService));
         } finally {
             recordAudit(user, request.sessionId(), request.message(), reply,
                     System.currentTimeMillis() - start);
@@ -225,7 +212,7 @@ public class SalesAgentController {
         // 流式路径的审计在完成/出错回调里落库（Token/工具明细跨线程暂缺，v2 待办）
         long start = System.currentTimeMillis();
         StringBuilder answerBuffer = new StringBuilder();
-        String userIdentity = buildUserIdentity(user);
+        String userIdentity = UserIdentityBuilder.build(user, salesQueryService);
 
         // 将 LangChain4j 的流式回调转换为可由 HTTP 接口发送的事件流。
         return Flux.create(sink -> {
