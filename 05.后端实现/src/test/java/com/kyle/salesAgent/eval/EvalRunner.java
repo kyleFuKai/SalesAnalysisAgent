@@ -10,6 +10,7 @@ import com.kyle.salesAgent.repository.SalesRepRepository;
 import com.kyle.salesAgent.security.UserContext;
 import com.kyle.salesAgent.security.UserIdentityBuilder;
 import com.kyle.salesAgent.service.SalesQueryService;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * @date 2026/10/2
  */
 @SpringBootTest
+@Tag("integration")   // 需要真实 MySQL/Redis/智谱 API
 @EnabledIfSystemProperty(named = "eval.run", matches = "true")
 public class EvalRunner {
 

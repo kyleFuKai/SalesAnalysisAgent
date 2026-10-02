@@ -1,6 +1,7 @@
 package com.kyle.salesAgent;
 
 import com.kyle.salesAgent.agent.SalesAgent;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,6 +14,7 @@ import java.time.LocalDate;
  * @date 2026/9/23 15:20
  */
 @SpringBootTest
+@Tag("integration")   // 需要真实 MySQL/Redis/智谱 API：CI 与默认 mvn test 跳过
 public class SalesAgentSmokeTest {
 
     @Autowired

@@ -1,5 +1,7 @@
 # SalesAnalysisAgent
 
+[![CI](https://github.com/kyleFuKai/SalesAnalysisAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/kyleFuKai/SalesAnalysisAgent/actions/workflows/ci.yml)
+
 #### 介绍
 智能销售分析Agent
 

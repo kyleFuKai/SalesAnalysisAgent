@@ -24,6 +24,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <langchain4j.version>1.12.1</langchain4j.version>
         <satoken.version>1.39.0</satoken.version>
+        <!-- 默认排除 integration 标记的测试；本地跑集成测试用 -Dsurefire.excludedGroups= -->
+        <surefire.excludedGroups>integration</surefire.excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -143,6 +145,16 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            <!-- 默认跳过 integration 标记的测试（@SpringBootTest 需要真实 MySQL/Redis/LLM 环境，
+                 CI 与无环境开发机上只跑纯单测）。本地要跑集成测试：
+                 mvn test -Dsurefire.excludedGroups= -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>
