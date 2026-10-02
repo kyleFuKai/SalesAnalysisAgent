@@ -33,3 +33,4 @@ logs/
 ### Local config ###
 application-local.yml
 .env
+.env.bak

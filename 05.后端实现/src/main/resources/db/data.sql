@@ -37,25 +37,26 @@ INSERT INTO sa_sales_region (id, name) VALUES
 -- 销售员数据（每区 3 人，含 1 名主管；另有 1 名全国总监）
 -- 注：黄总 region_id=1 仅表示行政归属，不影响角色权限（SALES_DIRECTOR 走全公司无 region 过滤）
 -- ============================================================
-INSERT INTO sa_sales_rep (id, name, region_id, role, email) VALUES
+-- 密码统一为 123456（BCrypt 哈希；dev 环境共用同一个哈希即可验证通过，BCrypt 自带盐不影响 matches）
+INSERT INTO sa_sales_rep (id, name, region_id, role, email, password) VALUES
 -- 华东区
-(1,  '李明',   1, 'SALES_MANAGER',  'liming@163.com'),
-(2,  '张伟',   1, 'SALES_REP',      'zhangwei@163.com'),
-(3,  '王芳',   1, 'SALES_REP',      'wangfang@163.com'),
+(1,  '李明',   1, 'SALES_MANAGER',  'liming@163.com',    '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(2,  '张伟',   1, 'SALES_REP',      'zhangwei@163.com',  '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(3,  '王芳',   1, 'SALES_REP',      'wangfang@163.com',  '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
 -- 华南区
-(4,  '陈强',   2, 'SALES_MANAGER',  'chenqiang@163.com'),
-(5,  '刘洋',   2, 'SALES_REP',      'liuyang@163.com'),
-(6,  '赵雪',   2, 'SALES_REP',      'zhaoxue@163.com'),
+(4,  '陈强',   2, 'SALES_MANAGER',  'chenqiang@163.com', '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(5,  '刘洋',   2, 'SALES_REP',      'liuyang@163.com',   '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(6,  '赵雪',   2, 'SALES_REP',      'zhaoxue@163.com',   '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
 -- 华北区
-(7,  '孙磊',   3, 'SALES_MANAGER',  'sunlei@163.com'),
-(8,  '张磊',   3, 'SALES_REP',      'zhanglei@163.com'),
-(9,  '周丽',   3, 'SALES_REP',      'zhouli@163.com'),
+(7,  '孙磊',   3, 'SALES_MANAGER',  'sunlei@163.com',    '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(8,  '张磊',   3, 'SALES_REP',      'zhanglei@163.com',  '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(9,  '周丽',   3, 'SALES_REP',      'zhouli@163.com',    '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
 -- 西南区
-(10, '吴刚',   4, 'SALES_MANAGER',  'wugang@163.com'),
-(11, '郑华',   4, 'SALES_REP',      'zhenghua@163.com'),
-(12, '林敏',   4, 'SALES_REP',      'linmin@163.com'),
+(10, '吴刚',   4, 'SALES_MANAGER',  'wugang@163.com',    '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(11, '郑华',   4, 'SALES_REP',      'zhenghua@163.com',  '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
+(12, '林敏',   4, 'SALES_REP',      'linmin@163.com',    '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi'),
 -- 全国总监
-(13, '黄总',   1, 'SALES_DIRECTOR', 'huang@163.com');
+(13, '黄总',   1, 'SALES_DIRECTOR', 'huang@163.com',     '$2a$10$rAcRrozOo7LuUKmgIP.aFu4bxQL2sD1bNHkdUXvqq4ZsVf8eV37Pi');
 
 -- ============================================================
 -- 产品数据（4 个品类，20 个 SKU；id=6 为异常 SKU）

@@ -1,12 +1,16 @@
 package com.kyle.salesAgent.controller;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * 统一处理 HTTP 请求参数错误和未预期异常，避免向客户端暴露内部错误信息。
@@ -55,6 +59,42 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<String> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return ResponseEntity.badRequest().body("请求参数格式错误：" + e.getName());
+    }
+
+    /**
+     * 未登录/登录过期：Sa-Token 登录校验抛出的异常。
+     * 之前会落进兜底 500，前端无法据此跳转登录页。
+     *
+     * @param e 未登录异常
+     * @return HTTP 401 和提示
+     */
+    @ExceptionHandler(NotLoginException.class)
+    public ResponseEntity<String> handleNotLogin(NotLoginException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("未登录或登录已过期");
+    }
+
+    /**
+     * 带 HTTP 状态码的业务异常（如限流 429）：按异常自带的状态码和原因返回。
+     *
+     * @param e 状态码异常
+     * @return 异常自带的状态码和原因
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<String> handleResponseStatus(ResponseStatusException e) {
+        return ResponseEntity.status(e.getStatusCode())
+                .body(e.getReason() != null ? e.getReason() : "请求被拒绝");
+    }
+
+    /**
+     * 权限拒绝：Service 层行级校验不通过或 fail-closed 兜底（架构 4.2）。
+     * 返回 403 和面向用户的话术；工具链路里该消息也会透传给模型用于拒答。
+     *
+     * @param e 权限拒绝异常
+     * @return HTTP 403 和拒绝原因
+     */
+    @ExceptionHandler(PermissionDeniedException.class)
+    public ResponseEntity<String> handlePermissionDenied(PermissionDeniedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.kyle.salesAgent.entity;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -37,6 +38,11 @@ public class SalesRep {
     /** 角色：SALES_REP(销售员)/SALES_MANAGER(销售主管)/SALES_DIRECTOR(销售总监) */
     @Column(nullable = false, length = 20)
     private String role;
+
+    /** 密码（BCrypt 哈希，60 字符）。@JsonIgnore：任何 JSON 序列化都不得把哈希带出接口 */
+    @JsonIgnore
+    @Column(nullable = false, length = 72)
+    private String password;
 
     /** 邮箱 */
     @Column(length = 100)

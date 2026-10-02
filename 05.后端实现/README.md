@@ -56,6 +56,35 @@ mvn spring-boot:run
 
 启动时 `schema.sql` 自动建表（开发环境配置 `spring.sql.init.mode=always`）。
 
+### 已有库升级（2026-10-01 加密码列）
+
+`sa_sales_rep` 表新增了 `password` 列。老库执行一次 ALTER（新库跳过，schema.sql 已含此列）：
+
+```sql
+ALTER TABLE sa_sales_rep ADD COLUMN password VARCHAR(72) NOT NULL COMMENT '密码(BCrypt 哈希)' AFTER role;
+```
+
+重启后 `data.sql` 会自动重灌全部测试数据（含密码哈希）。
+
+### 测试账号
+
+| repId | 姓名 | 角色 | 密码 |
+| --- | --- | --- | --- |
+| 1 | 李明 | SALES_MANAGER（华东区主管） | 123456 |
+| 2 | 张伟 | SALES_REP（华东区销售员） | 123456 |
+| 8 | 张磊 | SALES_REP（华北区销售员） | 123456 |
+| 13 | 黄总 | SALES_DIRECTOR（总监） | 123456 |
+
+全部 13 个账号密码均为 `123456`（BCrypt 哈希存于 data.sql）。登录：
+
+```bash
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"repId": 13, "password": "123456"}'
+```
+
+登录后每个请求在 header 携带 token：`satoken: <token值>`。
+
 ## 项目结构
 
 按架构文档 v1.0.2 第 5 节约定：

@@ -98,6 +98,17 @@
             <artifactId>sa-token-spring-boot3-starter</artifactId>
             <version>${satoken.version}</version>
         </dependency>
+        <!-- BCrypt 密码哈希（仅 crypto 工具包，不引入 Spring Security 过滤器链，避免与 Sa-Token 冲突） -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- Guava RateLimiter：接入层按用户限频（架构 3.2.2；单实例内存态） -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.3.1-jre</version>
+        </dependency>
         <!-- spring-dotenv：启动时自动加载 .env 文件 -->
         <dependency>
             <groupId>me.paulschwarz</groupId>
