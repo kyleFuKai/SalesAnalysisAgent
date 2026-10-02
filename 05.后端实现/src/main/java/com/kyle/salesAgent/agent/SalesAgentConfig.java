@@ -51,10 +51,13 @@ public class SalesAgentConfig {
                         salesTrendTool,
                         chartGeneratorTool,
                         anomalyDetectionTool)
-                .beforeToolExecution(exec ->
-                        log.info("▶ 工具调用开始 | 工具：{} | 参数：{}",
-                                exec.request().name(),
-                                exec.request().arguments()))
+                .beforeToolExecution(exec -> {
+                    // 审计采集：工具名进当前请求的审计记录（无上下文时静默跳过）
+                    com.kyle.salesAgent.audit.AuditContext.addTool(exec.request().name());
+                    log.info("▶ 工具调用开始 | 工具：{} | 参数：{}",
+                            exec.request().name(),
+                            exec.request().arguments());
+                })
                 .afterToolExecution(exec ->
                         log.info("◀ 工具调用完成 | 工具：{} | 结果长度：{} 字符",
                                 exec.request().name(),
@@ -65,6 +68,9 @@ public class SalesAgentConfig {
                                 .maxMessages(20)         // 保留最近 20 条消息
                                 .chatMemoryStore(chatMemoryStore)
                                 .build())
+                // 执行护栏（架构 3.2.3）：限制单次问答内连续工具调用轮数，
+                // 防止模型循环调工具拖垮 Token 成本与 15 秒目标
+                .maxSequentialToolsInvocations(8)
                 .build();
     }
 }

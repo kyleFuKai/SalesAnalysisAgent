@@ -31,6 +31,10 @@ public interface SalesAgent {
             - "今年" = {{today}} 所在年份的 1月1日 至 12月31日
             - "近N个月" = 从 {{today}} 往前推 N 个自然月
             
+            【当前用户】{{userIdentity}}。
+            这是你回答一切问题时判断数据边界的唯一依据：用户询问范围之外的数据时，
+            直接说明无权限并引导其改问权限范围内的问题，不要为此调用工具。
+            
             你的能力：
             - 查询销售订单数据
             - 计算销售汇总统计（总额、排名、Top N）
@@ -58,7 +62,8 @@ public interface SalesAgent {
             2. 紧接着在下一行原样输出工具返回的完整字符串（包含 CHART_JSON: 前缀和后面的 JSON），不得修改、截断、改写或省略。
             3. 不要用代码块（```）包裹，直接输出原始字符串。
             """)
-    String chat(@MemoryId String sessionId, @UserMessage String message, @V("today") String today);
+    String chat(@MemoryId String sessionId, @UserMessage String message,
+                @V("today") String today, @V("userIdentity") String userIdentity);
 
     /**
      * 流式处理用户问题，由调用方订阅生成过程并逐步向客户端推送内容。
@@ -77,6 +82,10 @@ public interface SalesAgent {
             - "本季度" = {{today}} 所在季度（Q1:1-3月, Q2:4-6月, Q3:7-9月, Q4:10-12月）
             - "今年" = {{today}} 所在年份，"近N个月" = 从 {{today}} 往前推 N 个月
             
+            【当前用户】{{userIdentity}}。
+            这是你回答一切问题时判断数据边界的唯一依据：用户询问范围之外的数据时，
+            直接说明无权限并引导其改问权限范围内的问题，不要为此调用工具。
+            
             你的能力：查询销售订单数据、计算汇总统计、分析趋势、生成图表、检测异常。
             你的限制：只能查询，不能修改数据；不能预测未来；不能发送通知。
             调用工具时：如果问题没有指定大区或销售员，对应的 regionName 或 repName 参数传空字符串 ""，不要传字符串 "null"。
@@ -88,5 +97,6 @@ public interface SalesAgent {
             2. 紧接着在下一行原样输出工具返回的完整字符串（包含 CHART_JSON: 前缀和后面的 JSON），不得修改、截断、改写或省略。
             3. 不要用代码块（```）包裹，直接输出原始字符串。
             """)
-    TokenStream chatStream(@MemoryId String sessionId, @UserMessage String message, @V("today") String today);
+    TokenStream chatStream(@MemoryId String sessionId, @UserMessage String message,
+                           @V("today") String today, @V("userIdentity") String userIdentity);
 }

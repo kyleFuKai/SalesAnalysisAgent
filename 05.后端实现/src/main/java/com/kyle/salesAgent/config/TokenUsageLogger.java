@@ -1,5 +1,6 @@
 package com.kyle.salesAgent.config;
 
+import com.kyle.salesAgent.audit.AuditContext;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.model.chat.listener.ChatModelResponseContext;
 import io.micrometer.core.instrument.Counter;
@@ -51,6 +52,9 @@ public class TokenUsageLogger implements ChatModelListener {
 
             inputTokenCounter.increment(input);
             outputTokenCounter.increment(output);
+
+            // 审计采集：同步路径下本次会话的 Token 累进 AuditContext（无上下文时静默跳过）
+            AuditContext.addTokens(input, output);
 
             if (inputPricePerK.signum() > 0 || outputPricePerK.signum() > 0) {
                 // 单价未配置（为 0）时只记 Token 数，不算钱，避免拿错价格输出误导性费用

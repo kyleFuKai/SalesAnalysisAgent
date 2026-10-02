@@ -65,12 +65,16 @@ langchain4j:
       model-name: glm-5.3-flash
       temperature: 0.1
       max-tokens: 2048
+      timeout: 15s                       # 单次 LLM 调用超时（执行护栏，架构 3.2.3）
+      max-retries: 2                     # 失败重试预算
     streaming-chat-model:
       base-url: https://open.bigmodel.cn/api/paas/v4
       api-key: ${ZHIPUAI_API_KEY}
       model-name: glm-5.3-flash
       temperature: 0.1
       max-tokens: 2048
+      timeout: 15s                       # 单次 LLM 调用超时（执行护栏，架构 3.2.3）
+      max-retries: 2                     # 失败重试预算
 
 # ============ Sa-Token 鉴权 ============
 sa-token:
@@ -89,6 +93,9 @@ sales-agent:
   tool:
     anomaly-threshold-days: 7         # 异常检测阈值（与需求文档 4.1-E19 "≥7 天" 一致）
     trend-drop-threshold: 0.3         # 环比下降 30% 触发预警（需求文档 4.1-E18）
+  cache:
+    anomaly-ttl-seconds: 120          # 异常检测组合结果的工具层手动缓存 TTL（需求 7.2 最敏感档）
+    answer-ttl-seconds: 300           # 相同问题+相同身份的回答缓存 TTL（省 Token，需求 7.3）
 
 app:
   auth:
