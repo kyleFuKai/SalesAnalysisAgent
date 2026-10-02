@@ -2,6 +2,10 @@ name: CI
 
 on: [push, pull_request]
 
+defaults:
+  run:
+    working-directory: 05.后端实现   # pom.xml 在子目录，不在仓库根
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,6 +18,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
+          cache-dependency-path: 05.后端实现/pom.xml
 
       # 只跑纯单测（integration 标记的 @SpringBootTest 需要真实 MySQL/Redis/LLM 环境，已默认排除）
       - name: Run unit tests
