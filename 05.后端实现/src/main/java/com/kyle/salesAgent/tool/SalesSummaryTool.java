@@ -3,6 +3,8 @@ package com.kyle.salesAgent.tool;
 import com.kyle.salesAgent.dto.ProductSalesDTO;
 import com.kyle.salesAgent.dto.RegionSalesDTO;
 import com.kyle.salesAgent.dto.RepSalesDTO;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
+import com.kyle.salesAgent.security.UserContext;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -21,8 +23,9 @@ import java.util.List;
  * 原始明细在 SalesQueryTool，趋势对比在 SalesTrendTool，别混。
  *
  * 口径跟 Service 一致：毛额，只算 COMPLETED 订单。
- * 工具层不做权限校验，大区收窄靠调用方传 regionName；跨区排名是大区对比，
- * 天然只有总监能问，上层约束。
+ * 工具层不做权限校验：范围收敛在 Service 层按 UserContext 强制注入，工具传入的
+ * regionName 只是查询意图，越出权限（如销售员查排名、主管查别区）会被拒绝，
+ * 拒绝话术透传给模型拒答。销售员的"无主体汇总"在本类路由到按人查询（4.4 收窄规则）。
  *
  * @author kyle
  * @version 1.0
@@ -34,7 +37,7 @@ import java.util.List;
 public class SalesSummaryTool {
 
     private final SalesQueryService queryService;
-
+    private final ToolInputValidator validator;  // 注入校验器
     /**
      * 销售员业绩排名，Top N。对应用例"本月 Top 5 销售员"、"华东区 Top 3 销售员是谁"。
      * regionName 传了就只排本区，不传排全公司。
@@ -52,10 +55,10 @@ public class SalesSummaryTool {
                 startDate, endDate, regionName, topN);
 
         try {
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
-            // 上限 20 防模型传个大数把上下文撑爆，下限 1 防 0 和负数
-            int n = Math.min(Math.max(topN, 1), 20);
+            // 校验 + 解析一次完成（validateDate 直接返回 LocalDate）；n 收敛到 1~20
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            int n = validator.validateTopN(topN);
 
             // 大区名查不到就报错，不能当成全公司查——不然标题写着华东区，
             // 数据却是全公司的（这个 bug 真出现过）
@@ -72,11 +75,16 @@ public class SalesSummaryTool {
                 return "该时段内暂无销售数据";
             }
 
+            // 主管没传大区名时 Service 会自动收窄本区，标题必须写真实范围
+            UserContext.UserInfo rankingUser = UserContext.get();
+            String scopeSuffix = regionName != null && !regionName.isBlank() ? "，" + regionName
+                    : (rankingUser != null && rankingUser.isManager()
+                            ? "，" + queryService.getRegionName(rankingUser.regionId()) : "，全公司");
+
             StringBuilder sb = new StringBuilder();
-            // 不传大区就明写"全公司"，别让模型猜
+            // 不传大区就明写真实范围，别让模型猜
             sb.append(String.format("销售员业绩排名（%s 至 %s%s）：\n\n",
-                    startDate, endDate,
-                    regionName != null && !regionName.isBlank() ? "，" + regionName : "，全公司"));
+                    startDate, endDate, scopeSuffix));
 
             for (int i = 0; i < reps.size(); i++) {
                 RepSalesDTO rep = reps.get(i);
@@ -87,8 +95,12 @@ public class SalesSummaryTool {
             // 等补了真值再加
             return sb.toString();
 
-        } catch (DateTimeParseException e) {
-            return "日期格式错误，请使用 yyyy-MM-dd 格式";
+        } catch (PermissionDeniedException e) {
+            // 权限拒绝话术透传给模型（如"销售员无权查看销售员排名"），它据此拒答
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            // 校验失败的消息本身就是纠正提示（validateDate/validateTopN），透传让模型自行修正
+            return e.getMessage();
         } catch (Exception e) {
             log.error("查询销售员排名失败", e);
             return "查询排名数据时出现问题，请稍后重试";
@@ -108,8 +120,9 @@ public class SalesSummaryTool {
         log.info("工具调用-getRegionRanking: start={}, end={}", startDate, endDate);
 
         try {
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
 
             List<RegionSalesDTO> regions = queryService.queryRegionRanking(start, end);
             if (regions.isEmpty()) {
@@ -136,8 +149,11 @@ public class SalesSummaryTool {
             sb.append(String.format("\n全公司合计：¥%,.0f", grandTotal));
             return sb.toString();
 
-        } catch (DateTimeParseException e) {
-            return "日期格式错误，请使用 yyyy-MM-dd 格式";
+        } catch (PermissionDeniedException e) {
+            // 非总监调跨区排名时的话术（"各大区业绩对比仅销售总监可查看"）
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (Exception e) {
             log.error("查询大区排名失败", e);
             return "查询大区数据时出现问题，请稍后重试";
@@ -163,13 +179,21 @@ public class SalesSummaryTool {
         log.info("工具调用-getTopProducts: start={}, end={}, topN={}", startDate, endDate, topN);
 
         try {
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
             boolean isWorst = topN < 0;
             int n = Math.min(Math.abs(topN), 20);
 
+            // 产品维度的权限收窄：销售员看自己经手的、主管看本区的、总监全公司。
+            // Service 层会再校验一次，这里只负责把范围算出来
+            UserContext.UserInfo user = UserContext.get();
+            Long regionScope = user != null && user.isManager() ? user.regionId() : null;
+            Long repScope = user != null && user.isRep() ? user.repId() : null;
+
             // 查最差时先拿全量（传 999），回头切尾部；查最佳直接让 Service 截前 n
-            List<ProductSalesDTO> products = queryService.queryProductRanking(start, end, isWorst ? 999 : n);
+            List<ProductSalesDTO> products = queryService.queryProductRanking(
+                    regionScope, repScope, start, end, isWorst ? 999 : n);
             if (products.isEmpty()) {
                 return "该时段内暂无产品销售数据";
             }
@@ -211,8 +235,10 @@ public class SalesSummaryTool {
             }
             return sb.toString();
 
-        } catch (DateTimeParseException e) {
-            return "日期格式错误，请使用 yyyy-MM-dd 格式";
+        } catch (PermissionDeniedException e) {
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (Exception e) {
             log.error("查询产品排名失败", e);
             return "查询产品数据时出现问题，请稍后重试";
@@ -243,14 +269,27 @@ public class SalesSummaryTool {
                 startDate, endDate, regionName, repName);
 
         try {
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
 
             BigDecimal totalAmount;
             Long orderCount;
             String scopeLabel;
 
-            if (repName != null && !repName.isBlank()) {
+            // 销售员"无主体汇总"自动收窄为本人（需求 4.4 通用收窄规则）：
+            // 范围标签用本人姓名，避免模型拿着个人数据答成"全公司"
+            UserContext.UserInfo user = UserContext.get();
+            boolean repSelfQuery = user != null && user.isRep() && (repName == null || repName.isBlank());
+
+            if (repSelfQuery) {
+                if (user.repId() == null) {
+                    return "当前账号未关联销售员身份，无法按人查询";
+                }
+                totalAmount = queryService.queryRepTotalAmount(user.repId(), start, end);
+                orderCount = queryService.queryRepOrderCount(user.repId(), start, end);
+                scopeLabel = user.username() != null ? user.username() : "本人";
+            } else if (repName != null && !repName.isBlank()) {
                 // 按人。查无此人要明说，不能当"没数据"
                 Long repId = queryService.getRepIdByName(repName);
                 if (repId == null) {
@@ -278,15 +317,21 @@ public class SalesSummaryTool {
                 }
                 totalAmount = queryService.queryTotalAmount(regionId, start, end);
                 orderCount = queryService.queryOrderCount(regionId, start, end);
-                scopeLabel = regionName != null && !regionName.isBlank() ? regionName : "全公司";
+                // 主管没传大区名时 Service 会自动填本区，标签必须跟着写真实范围，不能骗模型说"全公司"
+                scopeLabel = regionName != null && !regionName.isBlank() ? regionName
+                        : (user != null && user.isManager()
+                                ? queryService.getRegionName(user.regionId()) : "全公司");
             }
 
             // 金额和订单数同一个口径，模型可以放心放一起说
             return String.format("销售额汇总（%s 至 %s，%s）：\n总销售额：¥%,.0f\n完成订单数：%d 笔\n（毛额口径，仅统计已完成订单）",
                     startDate, endDate, scopeLabel, totalAmount, orderCount);
 
-        } catch (DateTimeParseException e) {
-            return "日期格式错误，请使用 yyyy-MM-dd 格式";
+        } catch (PermissionDeniedException e) {
+            // 销售员误查他人/主管越区等场景：话术透传给模型拒答
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (Exception e) {
             log.error("查询销售汇总失败", e);
             return "查询汇总数据时出现问题，请稍后重试";

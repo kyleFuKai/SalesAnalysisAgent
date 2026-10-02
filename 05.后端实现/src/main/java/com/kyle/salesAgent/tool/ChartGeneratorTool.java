@@ -5,6 +5,8 @@ import com.kyle.salesAgent.dto.MonthlyTrendDTO;
 import com.kyle.salesAgent.dto.ProductSalesDTO;
 import com.kyle.salesAgent.dto.RepSalesDTO;
 import com.kyle.salesAgent.dto.RegionSalesDTO;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
+import com.kyle.salesAgent.security.UserContext;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -39,6 +41,7 @@ import java.util.Map;
 public class ChartGeneratorTool {
 
     private final SalesQueryService queryService;
+    private final ToolInputValidator validator;
     // 用 Spring 容器里那份 ObjectMapper，别自己 new——以后全局改序列化配置时这里跟着走
     private final ObjectMapper objectMapper;
 
@@ -70,8 +73,20 @@ public class ChartGeneratorTool {
             if (regionId == null && regionName != null && !regionName.isBlank()) {
                 return "未找到大区：" + regionName;
             }
+            // 销售员路由：折线图数据自动收窄为本人；带 regionName 直接拒绝
+            UserContext.UserInfo user = UserContext.get();
+            Long repScopeId = null;
+            if (user != null && user.isRep()) {
+                if (user.repId() == null) {
+                    return "当前账号未关联销售员身份，无法查询";
+                }
+                if (regionName != null) {
+                    return "销售员只能查看自己的趋势图表";
+                }
+                repScopeId = user.repId();
+            }
 
-            List<MonthlyTrendDTO> data = queryService.queryMonthlyTrend(regionId, m);
+            List<MonthlyTrendDTO> data = queryService.queryMonthlyTrend(regionId, repScopeId, m);
             if (data.isEmpty()) {
                 return "暂无数据，无法生成图表";
             }
@@ -100,6 +115,9 @@ public class ChartGeneratorTool {
             String json = objectMapper.writeValueAsString(option);
             return "CHART_JSON:" + json;   // 前端识别 CHART_JSON: 前缀后提取 JSON 渲染
 
+        } catch (PermissionDeniedException e) {
+            // 权限拒绝话术透传给模型（销售员查排名图、主管查跨区图等）
+            return e.getMessage();
         } catch (Exception e) {
             log.error("生成折线图失败", e);
             return "生成图表数据时出现问题，请稍后重试";
@@ -134,8 +152,9 @@ public class ChartGeneratorTool {
                 return "dimension 仅支持 region（按大区）或 rep（按销售员），收到：" + dimension;
             }
 
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
 
             List<String> names;
             List<Number> values;
@@ -175,6 +194,10 @@ public class ChartGeneratorTool {
             String json = objectMapper.writeValueAsString(option);
             return "CHART_JSON:" + json;
 
+        } catch (PermissionDeniedException e) {
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (Exception e) {
             log.error("生成柱状图失败", e);
             return "生成图表数据时出现问题，请稍后重试";
@@ -205,8 +228,9 @@ public class ChartGeneratorTool {
                 return "dimension 仅支持 region（大区占比）或 category（品类占比），收到：" + dimension;
             }
 
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
 
             List<Map<String, Object>> pieData;
 
@@ -220,8 +244,13 @@ public class ChartGeneratorTool {
                     return item;
                 }).toList();
             } else {
+                // 品类占比按产品排名聚合，范围随角色收窄：销售员本人、主管本区、总监全公司
+                UserContext.UserInfo user = UserContext.get();
+                Long regionScope = user != null && user.isManager() ? user.regionId() : null;
+                Long repScope = user != null && user.isRep() ? user.repId() : null;
                 // 同品类金额累加，merge 一行就够。LinkedHashMap 保持品类首次出现的顺序
-                List<ProductSalesDTO> products = queryService.queryProductRanking(start, end, 100);
+                List<ProductSalesDTO> products = queryService.queryProductRanking(
+                        regionScope, repScope, start, end, 100);
                 Map<String, BigDecimal> categoryMap = new LinkedHashMap<>();
                 for (ProductSalesDTO p : products) {
                     categoryMap.merge(p.category(), p.totalAmount(), BigDecimal::add);
@@ -255,6 +284,10 @@ public class ChartGeneratorTool {
             String json = objectMapper.writeValueAsString(option);
             return "CHART_JSON:" + json;
 
+        } catch (PermissionDeniedException e) {
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (Exception e) {
             log.error("生成饼图失败", e);
             return "生成图表数据时出现问题，请稍后重试";

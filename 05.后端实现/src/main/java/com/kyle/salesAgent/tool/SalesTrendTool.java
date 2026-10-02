@@ -1,6 +1,8 @@
 package com.kyle.salesAgent.tool;
 
 import com.kyle.salesAgent.dto.MonthlyTrendDTO;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
+import com.kyle.salesAgent.security.UserContext;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -36,6 +38,7 @@ import java.util.stream.Collectors;
 public class SalesTrendTool {
 
     private final SalesQueryService queryService;
+    private final ToolInputValidator validator;
 
     /**
      * 环比：当期和上一期比，对应需求用例 10"本月比上月增长了多少"。
@@ -66,8 +69,9 @@ public class SalesTrendTool {
                 currentStart, currentEnd, prevStart, prevEnd, regionName);
 
         try {
-            LocalDate cStart = LocalDate.parse(currentStart);
-            LocalDate cEnd = LocalDate.parse(currentEnd);
+            LocalDate cStart = validator.validateDate(currentStart);
+            LocalDate cEnd = validator.validateDate(currentEnd);
+            validator.validateDateRange(cStart, cEnd);
 
             if ((prevStart == null) != (prevEnd == null)) {
                 return "对比周期需要同时传 prevStart 和 prevEnd（或都不传由系统自动推算）";
@@ -82,8 +86,9 @@ public class SalesTrendTool {
                 pEnd = cStart.minusDays(1);
                 pStart = pEnd.minusDays(days - 1);
             } else {
-                pStart = LocalDate.parse(prevStart);
-                pEnd = LocalDate.parse(prevEnd);
+                pStart = validator.validateDate(prevStart);
+                pEnd = validator.validateDate(prevEnd);
+                validator.validateDateRange(pStart, pEnd);
             }
 
             // 大区名查不到时返回提示，让模型纠正，不能当成"全公司"处理
@@ -92,15 +97,35 @@ public class SalesTrendTool {
                 return "未找到大区：" + regionName;
             }
 
-            // 两期口径一致（同一个 JPQL），比出来才有意义
-            BigDecimal currentAmount = queryService.queryTotalAmount(regionId, cStart, cEnd);
-            BigDecimal prevAmount = queryService.queryTotalAmount(regionId, pStart, pEnd);
+            // 销售员的路由：按人查询自己的两期金额（需求 4.4 收窄规则），
+            // 带 regionName 直接拒绝——静默换成自己的数据会造成"标题 A 数据 B"
+            UserContext.UserInfo user = UserContext.get();
+            BigDecimal currentAmount, prevAmount;
+            String scopeLabel;
+            if (user != null && user.isRep()) {
+                if (user.repId() == null) {
+                    return "当前账号未关联销售员身份，无法查询";
+                }
+                if (regionName != null) {
+                    return "销售员只能查看自己的业绩趋势";
+                }
+                currentAmount = queryService.queryRepTotalAmount(user.repId(), cStart, cEnd);
+                prevAmount = queryService.queryRepTotalAmount(user.repId(), pStart, pEnd);
+                scopeLabel = user.username() != null ? user.username() : "本人";
+            } else {
+                currentAmount = queryService.queryTotalAmount(regionId, cStart, cEnd);
+                prevAmount = queryService.queryTotalAmount(regionId, pStart, pEnd);
+                // 主管没传大区名时 Service 自动填本区，标签写真实范围
+                scopeLabel = regionName != null && !regionName.isBlank() ? regionName
+                        : (user != null && user.isManager()
+                                ? queryService.getRegionName(user.regionId()) : "全公司");
+            }
+
             // 除零的情况 Service 里处理了，上期没数据时返回 null
             BigDecimal growthRate = queryService.calcGrowthRate(currentAmount, prevAmount);
 
             StringBuilder sb = new StringBuilder();
-            sb.append(String.format("环比分析（%s）：\n\n",
-                    regionName != null && !regionName.isBlank() ? regionName : "全公司"));
+            sb.append(String.format("环比分析（%s）：\n\n", scopeLabel));
             // 两期金额分行列，模型拼回答时好引用
             sb.append(String.format("当前周期（%s 至 %s）：¥%,.0f\n", cStart, cEnd, currentAmount));
             sb.append(String.format("对比周期（%s 至 %s）：¥%,.0f\n", pStart, pEnd, prevAmount));
@@ -120,6 +145,11 @@ public class SalesTrendTool {
             }
             return sb.toString();
 
+        } catch (PermissionDeniedException e) {
+            // 权限拒绝话术透传给模型（主管查别区等场景）
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (DateTimeParseException e) {
             return "日期格式错误，请使用 yyyy-MM-dd 格式";
         } catch (Exception e) {
@@ -148,8 +178,9 @@ public class SalesTrendTool {
         log.info("工具调用-calcYearOverYear: start={}, end={}, region={}", startDate, endDate, regionName);
 
         try {
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
             LocalDate prevStart = start.minusYears(1);
             LocalDate prevEnd = end.minusYears(1);
 
@@ -158,13 +189,32 @@ public class SalesTrendTool {
                 return "未找到大区：" + regionName;
             }
 
-            BigDecimal thisYear = queryService.queryTotalAmount(regionId, start, end);
-            BigDecimal lastYear = queryService.queryTotalAmount(regionId, prevStart, prevEnd);
+            // 销售员路由：按人查自己的两期（同环比的收窄逻辑）
+            UserContext.UserInfo user = UserContext.get();
+            BigDecimal thisYear, lastYear;
+            String scopeLabel;
+            if (user != null && user.isRep()) {
+                if (user.repId() == null) {
+                    return "当前账号未关联销售员身份，无法查询";
+                }
+                if (regionName != null) {
+                    return "销售员只能查看自己的业绩趋势";
+                }
+                thisYear = queryService.queryRepTotalAmount(user.repId(), start, end);
+                lastYear = queryService.queryRepTotalAmount(user.repId(), prevStart, prevEnd);
+                scopeLabel = user.username() != null ? user.username() : "本人";
+            } else {
+                thisYear = queryService.queryTotalAmount(regionId, start, end);
+                lastYear = queryService.queryTotalAmount(regionId, prevStart, prevEnd);
+                // 主管没传大区名时 Service 自动填本区，标签写真实范围
+                scopeLabel = regionName != null && !regionName.isBlank() ? regionName
+                        : (user != null && user.isManager()
+                                ? queryService.getRegionName(user.regionId()) : "全公司");
+            }
             BigDecimal growthRate = queryService.calcGrowthRate(thisYear, lastYear);
 
             StringBuilder sb = new StringBuilder();
-            sb.append(String.format("同比分析（%s）：\n\n",
-                    regionName != null && !regionName.isBlank() ? regionName : "全公司"));
+            sb.append(String.format("同比分析（%s）：\n\n", scopeLabel));
             // 今年在前去年在后，模型照着念不会把顺序说反
             sb.append(String.format("今年（%s 至 %s）：¥%,.0f\n", start, end, thisYear));
             sb.append(String.format("去年（%s 至 %s）：¥%,.0f\n", prevStart, prevEnd, lastYear));
@@ -177,6 +227,10 @@ public class SalesTrendTool {
             }
             return sb.toString();
 
+        } catch (PermissionDeniedException e) {
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         } catch (DateTimeParseException e) {
             return "日期格式错误，请使用 yyyy-MM-dd 格式";
         } catch (Exception e) {
@@ -222,14 +276,32 @@ public class SalesTrendTool {
                 return "未找到大区：" + regionName;
             }
 
-            List<MonthlyTrendDTO> trend = queryService.queryMonthlyTrend(regionId, m);
+            // 销售员路由：趋势自动收窄为本人；带 regionName 直接拒绝
+            UserContext.UserInfo user = UserContext.get();
+            Long repScopeId = null;
+            String scopeLabel;
+            if (user != null && user.isRep()) {
+                if (user.repId() == null) {
+                    return "当前账号未关联销售员身份，无法查询";
+                }
+                if (regionName != null) {
+                    return "销售员只能查看自己的趋势数据";
+                }
+                repScopeId = user.repId();
+                scopeLabel = user.username() != null ? user.username() : "本人";
+            } else {
+                scopeLabel = regionName != null && !regionName.isBlank() ? regionName
+                        : (user != null && user.isManager()
+                                ? queryService.getRegionName(user.regionId()) : "全公司");
+            }
+
+            List<MonthlyTrendDTO> trend = queryService.queryMonthlyTrend(regionId, repScopeId, m);
             if (trend.isEmpty()) {
                 return "暂无趋势数据";
             }
 
             StringBuilder sb = new StringBuilder();
-            sb.append(String.format("月度销售趋势（近 %d 个月%s）：\n\n",
-                    m, regionName != null && !regionName.isBlank() ? "，" + regionName : "，全公司"));
+            sb.append(String.format("月度销售趋势（近 %d 个月，%s）：\n\n", m, scopeLabel));
 
             // 逐月列出来。首行没有环比（它没有上月可比），从第二行开始算一个
             // 挂在后面，模型直接引用就行，不用自己除
@@ -283,6 +355,8 @@ public class SalesTrendTool {
             }
             return sb.toString();
 
+        } catch (PermissionDeniedException e) {
+            return e.getMessage();
         } catch (Exception e) {
             // 这个方法没有字符串日期要解析，走到这的基本是 DB 或聚合的问题
             log.error("获取月度趋势失败", e);

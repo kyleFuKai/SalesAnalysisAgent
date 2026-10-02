@@ -2,6 +2,7 @@ package com.kyle.salesAgent.tool;
 
 import com.kyle.salesAgent.dto.OrderSummaryDTO;
 import com.kyle.salesAgent.entity.SalesOrder;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -16,9 +17,9 @@ import java.util.List;
 /**
  * 订单查询工具，答"有哪些订单/记录"这类问题（需求 4.1-A）。
  *
- * 工具层不做权限校验，范围由调用方按角色传参：销售员传 repName，
- * 主管传 regionName，总监可以都不传。UserContext 还没接（架构待办），
- * 目前权限全靠调用方自觉。
+ * 工具层不做权限校验：范围收敛在 Service 层按 UserContext 强制注入（fail-closed），
+ * 工具传入的 repName/regionName 只是查询意图，越出权限会被 PermissionDeniedException 拒绝，
+ * 消息透传给模型用于拒答。
  *
  * @author kyle
  * @version 1.0
@@ -30,6 +31,7 @@ import java.util.List;
 public class SalesQueryTool {
 
     private final SalesQueryService queryService;
+    private final ToolInputValidator validator;
 
     /**
      * 查订单的工具入口。返回的是拼好的文字（不是 JSON），模型会直接拿来组织回答，
@@ -50,8 +52,10 @@ public class SalesQueryTool {
                 startDate, endDate, regionName, repName, limit);
 
         try {
-            LocalDate start = LocalDate.parse(startDate);
-            LocalDate end = LocalDate.parse(endDate);
+            // 校验 + 解析一次完成；区间为空会被误答成"没有数据"，必须拦
+            LocalDate start = validator.validateDate(startDate);
+            LocalDate end = validator.validateDate(endDate);
+            validator.validateDateRange(start, end);
 
             // 用户问的是"张磊""华东区"，数据库过滤用的是 ID，这里做一次翻译。
             // 查不到就告诉模型名字不对，不能当作"没有数据"往下走
@@ -91,6 +95,12 @@ public class SalesQueryTool {
 
             return formatOrders(limited, orders.size(), startDate, endDate, regionName);
 
+        } catch (PermissionDeniedException e) {
+            // 权限拒绝的话术直接透传给模型——它需要区分"无权限"和"没数据"，据此拒答
+            return e.getMessage();
+        } catch (IllegalArgumentException e) {
+            // 校验失败的消息本身就是纠正提示，透传让模型自行修正
+            return e.getMessage();
         } catch (DateTimeParseException e) {
             // 告诉模型正确格式，它自己会修正重试
             return "日期格式错误，请使用 yyyy-MM-dd 格式，如：2024-11-01";

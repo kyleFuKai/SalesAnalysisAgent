@@ -14,5 +14,7 @@ public interface SalesRepRepository extends JpaRepository<SalesRep, Long> {
 
     List<SalesRep> findByRole(String role);
 
+    List<SalesRep> findByRoleAndRegionId(String role, Long regionId);
+
     Optional<SalesRep> findByName(String name);
 }

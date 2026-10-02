@@ -22,7 +22,7 @@ class ToolParameterSafetyTest {
         when(service.queryTotalAmount(null, LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30)))
                 .thenReturn(BigDecimal.valueOf(50));
 
-        String result = new SalesTrendTool(service).calcMonthOverMonth(
+        String result = new SalesTrendTool(service, new ToolInputValidator()).calcMonthOverMonth(
                 "2026-07-01", "2026-07-31", "null", " NULL ", "");
 
         assertTrue(result.contains("2026-05-31 至 2026-06-30"));
@@ -32,10 +32,21 @@ class ToolParameterSafetyTest {
     @Test
     void comparisonDatesMustBeSuppliedTogether() {
         SalesQueryService service = mock(SalesQueryService.class);
-        String result = new SalesTrendTool(service).calcMonthOverMonth(
+        String result = new SalesTrendTool(service, new ToolInputValidator()).calcMonthOverMonth(
                 "2026-07-01", "2026-07-31", "null", "2026-06-30", "");
 
         assertTrue(result.contains("同时传 prevStart 和 prevEnd"));
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void reversedDateRangeIsRejectedBeforeQuery() {
+        // 安全自检第 3 项：开始晚于结束必须拦，否则静默空集会被模型答成"没有数据"
+        SalesQueryService service = mock(SalesQueryService.class);
+        String result = new SalesQueryTool(service, new ToolInputValidator()).queryOrders(
+                "2026-07-31", "2026-07-01", "", "", 20);
+
+        assertTrue(result.contains("开始日期不能晚于结束日期"));
         verifyNoInteractions(service);
     }
 
@@ -46,7 +57,7 @@ class ToolParameterSafetyTest {
         when(service.getRepIdByName("张磊")).thenReturn(8L);
         when(service.repBelongsToRegion(8L, 1L)).thenReturn(false);
 
-        String result = new SalesQueryTool(service).queryOrders(
+        String result = new SalesQueryTool(service, new ToolInputValidator()).queryOrders(
                 "2026-07-01", "2026-07-31", "华东区", "张磊", 20);
 
         assertTrue(result.contains("张磊 不属于 华东区"));
@@ -60,7 +71,7 @@ class ToolParameterSafetyTest {
         when(service.getRepIdByName("张磊")).thenReturn(8L);
         when(service.repBelongsToRegion(8L, 1L)).thenReturn(false);
 
-        String result = new SalesSummaryTool(service).getSalesSummary(
+        String result = new SalesSummaryTool(service, new ToolInputValidator()).getSalesSummary(
                 "2026-07-01", "2026-07-31", "华东区", "张磊");
 
         assertTrue(result.contains("张磊 不属于 华东区"));
@@ -81,7 +92,7 @@ class ToolParameterSafetyTest {
         when(service.queryOrders(eq(null), eq(null), any(), any()))
                 .thenReturn(Collections.nCopies(21, order));
 
-        String result = new SalesQueryTool(service).queryOrders(
+        String result = new SalesQueryTool(service, new ToolInputValidator()).queryOrders(
                 "2026-07-01", "2026-07-31", "", "", 0);
 
         assertTrue(result.contains("以下显示前 20 条"));

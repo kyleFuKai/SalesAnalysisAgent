@@ -13,10 +13,13 @@ import java.util.List;
 @Repository
 public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
 
-    // 批量取截止日（含）之前的最近成交日，避免每个 SKU 各查一次。
+    // 批量取截止日（含）之前的最近成交日，避免每个 SKU 各查一次；regionId 传 null 表示全公司（主管传本区）
     @Query("SELECT o.productId, MAX(o.orderDate) FROM SalesOrder o " +
-           "WHERE o.status = 'COMPLETED' AND o.orderDate <= :end GROUP BY o.productId")
-    List<Object[]> findLastOrderDates(@Param("end") LocalDate end);
+           "WHERE o.status = 'COMPLETED' " +
+           "AND (:regionId IS NULL OR o.regionId = :regionId) " +
+           "AND o.orderDate <= :end GROUP BY o.productId")
+    List<Object[]> findLastOrderDates(@Param("regionId") Long regionId,
+                                       @Param("end") LocalDate end);
 
     // 按销售员查
     List<SalesOrder> findByRepIdAndOrderDateBetween(Long repId, LocalDate start, LocalDate end);
@@ -71,12 +74,16 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
     List<Object[]> findRegionRanking(@Param("start") LocalDate start,
                                       @Param("end") LocalDate end);
 
-    // 各产品销售排名
+    // 各产品销售排名（regionId/repId 传 null 表示不限——权限收窄后的范围由 Service 注入）
     @Query("SELECT o.productId, SUM(o.amount) AS total, SUM(o.quantity) AS qty " +
            "FROM SalesOrder o WHERE o.status = 'COMPLETED' " +
            "AND o.orderDate BETWEEN :start AND :end " +
+           "AND (:regionId IS NULL OR o.regionId = :regionId) " +
+           "AND (:repId IS NULL OR o.repId = :repId) " +
            "GROUP BY o.productId ORDER BY total DESC")
-    List<Object[]> findProductRanking(@Param("start") LocalDate start,
+    List<Object[]> findProductRanking(@Param("regionId") Long regionId,
+                                       @Param("repId") Long repId,
+                                       @Param("start") LocalDate start,
                                        @Param("end") LocalDate end);
 
     // 月度汇总（用于趋势分析）
@@ -84,10 +91,12 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
                    "SUM(amount) AS total, COUNT(*) AS order_count " +
                    "FROM sa_sales_order WHERE status = 'COMPLETED' " +
                    "AND (:regionId IS NULL OR region_id = :regionId) " +
+                   "AND (:repId IS NULL OR rep_id = :repId) " +
                    "AND order_date BETWEEN :start AND :end " +
                    "GROUP BY month ORDER BY month",
            nativeQuery = true)
     List<Object[]> findMonthlyTrend(@Param("regionId") Long regionId,
+                                     @Param("repId") Long repId,
                                      @Param("start") LocalDate start,
                                      @Param("end") LocalDate end);
 
