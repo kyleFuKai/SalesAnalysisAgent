@@ -7,6 +7,7 @@ import com.kyle.salesAgent.entity.SalesRep;
 import com.kyle.salesAgent.service.SalesQueryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -21,14 +22,16 @@ import static org.mockito.Mockito.*;
  *
  * 两个测试特有的处理：
  *   @Value 字段不走配置，用 ReflectionTestUtils 手动塞值（阈值天数 5、降幅 0.3）；
- *   私有检测方法用 ReflectionTestUtils.invokeMethod 直调，一个用例盯一条规则。
+ *   私有检测方法用 ReflectionTestUtils.invokeMethod 直调，一个用例盯一条规则；
+ *   RedisTemplate 是 mock 的（这些用例都绕过入口方法，不碰缓存读写）。
  *
  * 有两个用例是"防退化"性质：verify(never()) 断言某些慢查询/错误方法没被调用，
  * 改代码时别看到它们碍眼就删——删了之后同样的问题会悄悄回来。
  */
 class AnomalyDetectionToolTest {
     private final SalesQueryService service = mock(SalesQueryService.class);
-    private final AnomalyDetectionTool tool = new AnomalyDetectionTool(service);
+    private final AnomalyDetectionTool tool =
+            new AnomalyDetectionTool(service, mock(RedisTemplate.class));
     // 固定"今天"，所有时间窗口都基于它推算，用例里的天数才能写死
     private final LocalDate end = LocalDate.of(2026, 9, 20);
 
@@ -116,10 +119,45 @@ class AnomalyDetectionToolTest {
         when(sold.getId()).thenReturn(6L);
         when(neverSold.getId()).thenReturn(7L);
         when(service.queryAnomalyProducts()).thenReturn(List.of(sold, neverSold));
-        when(service.queryLastOrderDates(end)).thenReturn(Map.of(6L, end.minusDays(5)));
-        List<AnomalyDTO> result = ReflectionTestUtils.invokeMethod(tool, "detectZeroSaleProducts", end);
+        when(service.queryLastOrderDates(null, end)).thenReturn(Map.of(6L, end.minusDays(5)));
+        // regionScopeId 传 null 模拟总监视角（全公司）；主管视角传本区 id
+        List<AnomalyDTO> result = ReflectionTestUtils.invokeMethod(tool, "detectZeroSaleProducts", end, null);
         assertThat(result).hasSize(1);
         assertThat(result.getFirst().description()).contains("5 天");
-        verify(service, times(1)).queryLastOrderDates(end);
+        verify(service, times(1)).queryLastOrderDates(null, end);
+    }
+
+    /**
+     * 销售员自助退单率：正好 15% 也要算（>= 边界，与主管/总监路径同一规则）；
+     * 对象显示"本人"而不是姓名，描述带分母口径说明。
+     */
+    @Test
+    void selfRefundDetectionUsesSameBoundaryAndSelfLabel() {
+        // Service 对销售员角色只返回自己一行
+        when(service.queryRefundRates(end.minusDays(29), end))
+                .thenReturn(java.util.Collections.singletonList(new Object[]{2L, 3L, 20L}));
+        List<AnomalyDTO> result = ReflectionTestUtils.invokeMethod(
+                tool, "detectHighRefundForSelf", end, 2L);
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().type()).isEqualTo("您的退单率偏高");
+        assertThat(result.getFirst().subject()).isEqualTo("本人");
+        assertThat(result.getFirst().description()).contains("15.0%");
+    }
+
+    /**
+     * 销售员自助业绩骤降：上期 1 万、本期 0 → 降幅 100% 记 HIGH，
+     * 阈值与主管/总监路径一致（trendDropThreshold）。
+     */
+    @Test
+    void selfPerformanceDropUsesConfiguredThreshold() {
+        when(service.queryRepTotalAmount(2L, end.minusDays(59), end.minusDays(30)))
+                .thenReturn(new BigDecimal("10000.00"));
+        when(service.queryRepTotalAmount(2L, end.minusDays(29), end))
+                .thenReturn(BigDecimal.ZERO);
+        List<AnomalyDTO> result = ReflectionTestUtils.invokeMethod(
+                tool, "detectPerformanceDropForSelf", end, 2L);
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().type()).isEqualTo("您的业绩明显下滑");
+        assertThat(result.getFirst().severity()).isEqualTo("HIGH");
     }
 }

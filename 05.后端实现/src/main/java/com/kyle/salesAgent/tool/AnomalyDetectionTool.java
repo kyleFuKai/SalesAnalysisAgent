@@ -1,18 +1,23 @@
 package com.kyle.salesAgent.tool;
 
+import com.kyle.salesAgent.config.RedisSafe;
 import com.kyle.salesAgent.dto.AnomalyDTO;
 import com.kyle.salesAgent.entity.Product;
 import com.kyle.salesAgent.entity.SalesRegion;
 import com.kyle.salesAgent.entity.SalesRep;
+import com.kyle.salesAgent.exception.PermissionDeniedException;
+import com.kyle.salesAgent.security.UserContext;
 import com.kyle.salesAgent.service.SalesQueryService;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -33,8 +38,11 @@ import java.util.Map;
  * 避免拿一两个订单的波动制造假警报。
  *
  * 无参数设计：统计窗口固定截至前一天（当天数据未走完，不完整），用户不需要也没法传日期。
- * 全公司视角，只有总监该问"有没有异常"，主管/总监的收窄等接了 UserContext
- * 在 queryAnomaly* 几个方法里收敛。
+ * 范围随角色收敛（架构 4.2 / 需求 4.4）：总监全公司；主管只检测本区（大区列表、
+ * 销售员列表、退单率行、产品最近成交日都由 Service 按 UserContext 收窄）；
+ * 销售员只检测自己（退单率 + 业绩骤降，看不到他人与大区数据）；未知角色拒绝。
+ * 结果缓存走工具层手动控制（RedisTemplate）：一次检测 = 十几次底层查询，
+ * 组合结果整体存 2 分钟，Key 含权限标签，错误提示不入缓存。
  *
  * @author kyle
  * @version 1.0
@@ -46,6 +54,7 @@ import java.util.Map;
 public class AnomalyDetectionTool {
 
     private final SalesQueryService queryService;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     /** 断销判定天数，配置在 application.yml（需求 E19 是 7 天）。 */
     @Value("${sales-agent.tool.anomaly-threshold-days:5}")
@@ -54,6 +63,10 @@ public class AnomalyDetectionTool {
     /** 业绩/订单骤降的报警线，0.3 即降幅超 30% 报警（需求 E18）。 */
     @Value("${sales-agent.tool.trend-drop-threshold:0.3}")
     private double trendDropThreshold;
+
+    /** 异常检测组合结果的缓存 TTL（秒），工具层手动控制（对应需求 7.2 最敏感档）。 */
+    @Value("${sales-agent.cache.anomaly-ttl-seconds:120}")
+    private long anomalyResultTtlSeconds;
 
     /**
      * 异常检测的工具入口，四个检测顺序执行，汇总后按 HIGH > MEDIUM > LOW 排序输出。
@@ -71,16 +84,52 @@ public class AnomalyDetectionTool {
         // 一次调用固定一个截止日，避免跨午夜造成四项检测口径不同。
         LocalDate end = LocalDate.now().minusDays(1);
 
+        // 入口按角色路由（需求 4.4 矩阵）：总监全公司、主管本区、销售员只测自己
+        //（E18 括号里明确"只能看自己是否下滑"）、未知角色拒绝而非当总监处理
+        UserContext.UserInfo user = UserContext.get();
+        if (user == null) {
+            return "未获取到用户身份，无法执行异常检测";
+        }
+
+        // 工具层手动缓存（精细控制）：一次检测 = 十几次底层查询，组合结果整体缓存 2 分钟。
+        // Key = 权限标签 + 截止日，角色/大区不同自然分开；写入放在 try 之后，
+        // 阈值非法/查询出错等失败路径不会被缓存
+        String cacheKey = String.format("anomaly:%s:%s", UserContext.cacheScopeTag(), end);
+        Object cached = RedisSafe.get(redisTemplate, cacheKey, null);
+        if (cached != null) {
+            log.info("工具调用-detectAllAnomalies: 命中结果缓存 key={}", cacheKey);
+            return (String) cached;
+        }
+
         try {
             // 配置是人改的，先验一遍。阈值不合法宁可整体不检测，也别拿错误规则跑出误导结论
             if (zeroSaleThresholdDays < 1 || !Double.isFinite(trendDropThreshold)
                     || trendDropThreshold <= 0 || trendDropThreshold >= 1) {
                 throw new IllegalStateException("异常阈值不合法：天数须为正数，下降比例须在 0 和 1 之间");
             }
-            anomalies.addAll(detectRegionDropAnomalies(end));
-            anomalies.addAll(detectZeroSaleProducts(end));
-            anomalies.addAll(detectHighRefundReps(end));
-            anomalies.addAll(detectRepPerformanceDrop(end));
+            if (user.isDirector()) {
+                anomalies.addAll(detectRegionDropAnomalies(end));
+                anomalies.addAll(detectZeroSaleProducts(end, null));
+                anomalies.addAll(detectHighRefundReps(end));
+                anomalies.addAll(detectRepPerformanceDrop(end));
+            } else if (user.isManager()) {
+                Long regionScopeId = user.regionId();
+                anomalies.addAll(detectRegionDropAnomalies(end));
+                anomalies.addAll(detectZeroSaleProducts(end, regionScopeId));
+                anomalies.addAll(detectHighRefundReps(end));
+                anomalies.addAll(detectRepPerformanceDrop(end));
+            } else if (user.isRep()) {
+                if (user.repId() == null) {
+                    return "当前账号未关联销售员身份，无法执行个人异常检测";
+                }
+                anomalies.addAll(detectHighRefundForSelf(end, user.repId()));
+                anomalies.addAll(detectPerformanceDropForSelf(end, user.repId()));
+            } else {
+                return "无法识别当前用户角色，请重新登录";
+            }
+        } catch (PermissionDeniedException e) {
+            // 权限拒绝话术透传给模型，区分"无权限"和"没异常"
+            return e.getMessage();
         } catch (Exception e) {
             log.error("异常检测出错", e);
             return "异常检测过程中出现问题，请稍后重试";
@@ -112,7 +161,10 @@ public class AnomalyDetectionTool {
             sb.append(String.format("  建议：%s\n\n", anomaly.suggestion()));
         }
 
-        return sb.toString();
+        // 走到这里说明检测成功（成功与"无异常"都值得缓存），写入后返回
+        String output = sb.toString();
+        RedisSafe.set(redisTemplate, cacheKey, output, Duration.ofSeconds(anomalyResultTtlSeconds));
+        return output;
     }
 
     // ============================================================
@@ -171,10 +223,12 @@ public class AnomalyDetectionTool {
      *   也可能是新品，不能凭空下结论；
      *   最近成交日按产品一次性批量查（queryLastOrderDates），
      *   不然 50 个 SKU 就是 50 次单查。
+     *   主管传本区 regionId："本区断销" = 在本区有成交记录但最近一直没出单；
+     *   本区从未成交的产品不在 Map 里，自然跳过。
      */
-    private List<AnomalyDTO> detectZeroSaleProducts(LocalDate end) {
+    private List<AnomalyDTO> detectZeroSaleProducts(LocalDate end, Long regionScopeId) {
         List<AnomalyDTO> result = new ArrayList<>();
-        Map<Long, LocalDate> lastSaleDates = queryService.queryLastOrderDates(end);
+        Map<Long, LocalDate> lastSaleDates = queryService.queryLastOrderDates(regionScopeId, end);
 
         for (Product product : queryService.queryAnomalyProducts()) {
             LocalDate lastSaleDate = lastSaleDates.get(product.getId());
@@ -284,6 +338,63 @@ public class AnomalyDetectionTool {
             case "MEDIUM" -> 1;
             default       -> 2;
         };
+    }
+
+    // ============================================================
+    // 销售员自助检测（需求 4.4：E18"只能看自己是否下滑"）
+    // ============================================================
+
+    /**
+     * 销售员自助：只检测自己的退单率，规则与 {@link #detectHighRefundReps} 完全一致
+     * （≥15% 报警、样本 <3 单跳过、分母含取消单）。数据来自 queryRefundRates——
+     * Service 会把销售员角色的结果过滤成只剩自己一行，天然拿不到别人的。
+     */
+    private List<AnomalyDTO> detectHighRefundForSelf(LocalDate end, Long repId) {
+        List<AnomalyDTO> result = new ArrayList<>();
+        List<Object[]> rows = queryService.queryRefundRates(end.minusDays(29), end);
+        for (Object[] row : rows) {
+            long refunded = ((Number) row[1]).longValue();
+            long total = ((Number) row[2]).longValue();
+            if (total < 3) continue; // 样本量太小，同主管/总监路径
+
+            double refundRate = (double) refunded / total;
+            if (refundRate >= 0.15) {
+                result.add(new AnomalyDTO("您的退单率偏高",
+                        refundRate > 0.3 ? "HIGH" : "MEDIUM", "本人",
+                        String.format("近 30 天退单率 %.1f%%（%d/%d 单，分母含取消订单）",
+                                refundRate * 100, refunded, total),
+                        "建议检查退单原因，是否有客户投诉需要跟进"));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 销售员自助：只检测自己的业绩骤降，窗口与阈值同 {@link #detectRepPerformanceDrop}
+     * （相邻两个 30 天窗口、降幅超配置阈值报警、超 60% HIGH、上期无基准跳过）。
+     * 对象写"本人"而不是姓名，话术从"建议与该销售员沟通"换成自查视角。
+     */
+    private List<AnomalyDTO> detectPerformanceDropForSelf(LocalDate end, Long repId) {
+        List<AnomalyDTO> result = new ArrayList<>();
+        LocalDate curStart = end.minusDays(29);
+        LocalDate prevEnd = curStart.minusDays(1);
+        LocalDate prevStart = prevEnd.minusDays(29);
+
+        BigDecimal previous = queryService.queryRepTotalAmount(repId, prevStart, prevEnd);
+        // 上期为零没有可比较基准，避免除零或凭空生成下降比例
+        if (previous.signum() <= 0) return result;
+        BigDecimal current = queryService.queryRepTotalAmount(repId, curStart, end);
+        BigDecimal decrease = previous.subtract(current);
+        if (decrease.compareTo(previous.multiply(BigDecimal.valueOf(trendDropThreshold))) <= 0) return result;
+        BigDecimal percent = decrease.multiply(BigDecimal.valueOf(100))
+                .divide(previous, 2, RoundingMode.HALF_UP);
+        String severity = decrease.compareTo(previous.multiply(new BigDecimal("0.6"))) > 0
+                ? "HIGH" : "MEDIUM";
+        result.add(new AnomalyDTO("您的业绩明显下滑", severity, "本人",
+                String.format("近 30 天已完成订单金额 %.2f 元，前 30 天 %.2f 元，下降 %.2f%%",
+                        current, previous, percent),
+                "建议主动梳理客户跟进情况，与主管沟通是否需要支持"));
+        return result;
     }
 
 }
